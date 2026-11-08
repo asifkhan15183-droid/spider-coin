@@ -5,8 +5,8 @@
 // =====================================================================
 const MAIN_ADMIN = "8825348718", ADMIN_USER = "Spider_Incom", BOT_USER = "SPC_Wallet_bot";
 const FOREVER = 4102444800000, SV = "4";
-const DEF = { rate: 10, minc: 5, refrw: 200, secs: 30, prw: 9.23, wd: 0, minw: 1000, ch: "", dep: "", wl: "USDT BEP20 address", vp1: 2, vp2: 10, vc: 1e5, vr: 20, disc: 5, mins: 1000, srw: 100, sm: "", rmn: 7, rmh: 12, dtr: 15 };
-const NK = ["rate", "minc", "refrw", "secs", "prw", "minw", "vp1", "vp2", "vc", "vr", "disc", "mins", "srw", "rmn", "rmh", "dtr"];
+const DEF = { rate: 10, minc: 5, refrw: 200, secs: 30, prw: 9.23, wd: 0, minw: 1000, ch: "", dep: "", wl: "USDT BEP20 address", vp1: 2, vp2: 10, vc: 1e5, vc2: 5e5, vr: 20, disc: 5, mins: 1000, srw: 100, sm: "", rmn: 7, rmh: 12, dtr: 15 };
+const NK = ["rate", "minc", "refrw", "secs", "prw", "minw", "vp1", "vp2", "vc", "vc2", "vr", "disc", "mins", "srw", "rmn", "rmh", "dtr"];
 const PL = { 1: { c: 5e3, v: 500, q: 0 }, 2: { c: 1e4, v: 1000, q: 0 }, 3: { c: 2e4, v: 1000, q: 1 } };
 const ADM = new Set(["al", "as", "at", "ae", "ad", "ap", "aw", "ao", "aa", "au", "ab", "ag"]);
 const J = (d, s = 200) => new Response(JSON.stringify(d), { status: s, headers: { "content-type": "application/json", "cache-control": "no-store" } });
@@ -307,19 +307,22 @@ async function run(rq, env) {
     case "sd": {
       const m = Math.round(+q.amt * 1e6) / 1e6, to = String(q.to || "").replace(/^@/, "").trim().toLowerCase();
       if (!(m > 0 && m >= N("mins"))) return E("Minimum send " + c.mins);
-      if (!/^[a-z0-9_]{4,32}$/.test(to)) return E("Enter a valid @username");
-      const v = await Q("SELECT id FROM u WHERE un=?", to);
+      const byId = /^[0-9]{5,15}$/.test(to);
+      if (!byId && !/^[a-z0-9_]{4,32}$/.test(to)) return E("Enter a valid @username or Telegram ID");
+      const v = byId ? await Q("SELECT id,un FROM u WHERE id=? AND rg=1", +to) : await Q("SELECT id,un FROM u WHERE un=?", to);
       if (!v) return E("User not found (they must open the app once)");
       if (v.id == id) return E("You cannot send to yourself");
       const g = "(SELECT b FROM u WHERE id=?)>=?", gb = [id, m];
-      const r = await db.batch([HS(id, "sent", -m, "@" + to, g, gb), HS(v.id, "received", m, "@" + (un || id), g, gb),
+      const r = await db.batch([HS(id, "sent", -m, v.un ? "@" + v.un : "ID " + v.id, g, gb), HS(v.id, "received", m, un ? "@" + un : "ID " + id, g, gb),
         P("UPDATE u SET b=CASE WHEN id=? THEN ROUND(b-?,6) ELSE ROUND(b+?,6) END WHERE id IN (?,?) AND " + g, id, m, m, id, v.id, ...gb)]);
       if (r[2].meta.changes != 2) return E("Not enough coins"); break;
     }
     case "bv": {
-      if (lv > 0) return E("You already have a VIP badge");
-      const k = N("vc"), g = "(SELECT b FROM u WHERE id=?)>=?", gb = [id, k];
-      const r = await db.batch([HS(id, "vip", -k, "VIP", g, gb), P("UPDATE u SET b=ROUND(b-?,6),vl=1,vx=? WHERE id=? AND " + g, k, FOREVER, id, ...gb)]);
+      const t2 = q.k == "v2";
+      if (!t2 && lv > 0) return E("You already have a VIP badge");
+      if (t2 && lv > 1) return E("You already have VVIP");
+      const k = N(t2 ? "vc2" : "vc"), g = "(SELECT b FROM u WHERE id=?)>=?", gb = [id, k];
+      const r = await db.batch([HS(id, "vip", -k, t2 ? "VVIP" : "VIP", g, gb), P("UPDATE u SET b=ROUND(b-?,6),vl=?,vx=? WHERE id=? AND " + g, k, t2 ? 2 : 1, FOREVER, id, ...gb)]);
       if (r[1].meta.changes != 1) return E("Not enough coins"); break;
     }
     case "vo": {
@@ -354,46 +357,78 @@ async function run(rq, env) {
 const HTML = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
 <script src="https://telegram.org/js/telegram-web-app.js"></script><title>Spider Coin</title>
 <style>
-:root{--a:#39ff88;--bg:#070d0a;--cd:#0e1813;--ln:#1d3a2b;--mu:#7fa592;--rd:#ff5470}
+:root{--a:#2dffa0;--bg:#030a06;--ln:#143826;--mu:#7aa88f;--rd:#ff5470;--gd:#f0d27a}
 *{box-sizing:border-box;margin:0;-webkit-tap-highlight-color:transparent}
 html{background:var(--bg)}
-body{font:14px/1.4 system-ui,sans-serif;background:var(--bg);color:#e6fff0;padding:0 12px 90px;min-height:100vh;max-width:480px;margin:0 auto;background-image:repeating-conic-gradient(from 0deg at 50% 0,rgba(57,255,136,.045) 0 1deg,transparent 1deg 14deg),repeating-radial-gradient(circle at 50% 0,rgba(57,255,136,.045) 0 1px,transparent 1px 44px);background-attachment:fixed}
+body{font:14px/1.4 system-ui,sans-serif;color:#e8fff2;padding:0 12px 96px;min-height:100vh;max-width:480px;margin:0 auto;background:repeating-conic-gradient(from 0deg at 50% 0,rgba(45,255,160,.035) 0 1deg,transparent 1deg 14deg),repeating-radial-gradient(circle at 50% 0,rgba(45,255,160,.035) 0 1px,transparent 1px 44px),radial-gradient(120% 55% at 50% -8%,#0c4a2c 0,transparent 62%),var(--bg);background-attachment:fixed}
 .g{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(145px,1fr))}
-.c{background:var(--cd);border:1px solid var(--ln);border-radius:14px;padding:14px;margin-bottom:10px}
-.b{width:100%;padding:12px;border:0;border-radius:10px;background:var(--a);color:#03140a;font-weight:800;font-size:15px;margin-top:4px;transition:transform .1s}
-.b:active{transform:scale(.97)}.b:disabled{background:#1d3a2b;color:var(--mu)}
-.b.x{background:var(--rd);color:#fff}
-input,select{width:100%;padding:11px;margin:5px 0;border-radius:10px;border:1px solid var(--ln);background:var(--bg);color:#e6fff0;font-size:16px}
-nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:480px;display:grid;grid-auto-flow:column;grid-auto-columns:1fr;background:#09130e;border-top:1px solid var(--ln);padding:6px 2px calc(6px + env(safe-area-inset-bottom))}
+.c{background:linear-gradient(160deg,#0a1a12,#060f0a);border:1px solid var(--ln);border-radius:16px;padding:14px;margin-bottom:10px;box-shadow:0 6px 24px rgba(0,0,0,.35)}
+.b{width:100%;padding:12px;border:0;border-radius:12px;background:linear-gradient(135deg,#2dffa0,#0fd47a);color:#02140a;font-weight:800;font-size:15px;margin-top:4px;transition:transform .1s;box-shadow:0 4px 16px rgba(45,255,160,.22)}
+.b:active{transform:scale(.97)}.b:disabled{background:#12281c;color:var(--mu);box-shadow:none}
+.b.x{background:var(--rd);color:#fff;box-shadow:none}.b.gd{background:linear-gradient(135deg,#f6dc8d,#c79a3b);color:#2a1d02;box-shadow:0 4px 16px rgba(240,210,122,.22)}
+input,select{width:100%;padding:12px;margin:5px 0;border-radius:12px;border:1px solid var(--ln);background:#040c07;color:#e8fff2;font-size:16px}
+nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:480px;display:grid;grid-auto-flow:column;grid-auto-columns:1fr;background:rgba(5,14,9,.92);backdrop-filter:blur(10px);border-top:1px solid var(--ln);padding:6px 2px calc(6px + env(safe-area-inset-bottom))}
 nav a{display:flex;flex-direction:column;align-items:center;gap:3px;padding:7px 0;font-size:11px;color:var(--mu)}nav a.on{color:var(--a)}
-.big{font-size:clamp(28px,9vw,42px);font-weight:800;color:var(--a);font-variant-numeric:tabular-nums;letter-spacing:1px;margin:6px 0;text-shadow:0 0 18px rgba(57,255,136,.35)}
+.big{font-size:clamp(28px,9vw,42px);font-weight:800;color:var(--a);font-variant-numeric:tabular-nums;letter-spacing:1px;margin:6px 0;text-shadow:0 0 18px rgba(45,255,160,.4)}
 .m{color:var(--mu);font-size:12px}h3{margin:14px 0 8px}
-header{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:10px;height:56px;margin:0 -12px;padding:0 12px;background:var(--bg);border-bottom:1px solid var(--ln)}
-.av{flex:none;width:40px;height:40px;border-radius:50%;background:var(--a);color:#03140a;display:grid;place-items:center;font-weight:800}
+header{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:10px;height:58px;margin:0 -12px;padding:0 12px;background:rgba(3,10,6,.94);backdrop-filter:blur(8px);border-bottom:1px solid var(--ln)}
+.av{flex:none;width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#2dffa0,#0a8a52);color:#02140a;display:grid;place-items:center;font-weight:800;border:2px solid var(--gd)}
 .tt{flex:1;min-width:0;display:flex;flex-direction:column}.tt b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.tt span{font-size:12px;color:var(--mu)}
-.pill{padding:6px 12px;border:1px solid var(--ln);border-radius:18px;font-weight:700;flex:none;font-variant-numeric:tabular-nums;color:var(--a)}.pg{padding-top:12px}
-.cs{display:flex;justify-content:center;gap:6px;height:78px}.cn{animation:fl 2.4s ease-in-out infinite}.cn:nth-child(2){animation-delay:.4s}.cn:nth-child(3){animation-delay:.8s}@keyframes fl{50%{transform:translateY(-8px) rotate(6deg)}}
-.pl{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--a);margin-right:6px;animation:pl 1.2s infinite}@keyframes pl{50%{opacity:.25;transform:scale(1.6)}}
-.pb{height:6px;border-radius:3px;background:var(--ln);margin:6px 0 8px;overflow:hidden}.pb i{display:block;height:6px;width:0;background:var(--a);transition:width .2s}
+.pill{padding:6px 12px;border:1px solid var(--gd);border-radius:18px;font-weight:700;flex:none;font-variant-numeric:tabular-nums;color:var(--gd)}.pg{padding-top:12px}
+.pl{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--a);animation:pl 1.2s infinite}@keyframes pl{50%{opacity:.25;transform:scale(1.6)}}
 .fi{animation:fi .22s}@keyframes fi{from{opacity:0;transform:translateY(8px)}}
-#ts{position:fixed;top:64px;left:50%;transform:translate(-50%,-16px);background:#10241a;border:1px solid var(--ln);padding:10px 16px;border-radius:20px;opacity:0;transition:.25s;pointer-events:none;z-index:9;font-weight:700;max-width:92%;text-align:center}#ts.on{opacity:1;transform:translate(-50%,0)}
+#ts{position:fixed;top:66px;left:50%;transform:translate(-50%,-16px);background:#0d2418;border:1px solid var(--a);padding:10px 16px;border-radius:20px;opacity:0;transition:.25s;pointer-events:none;z-index:9;font-weight:700;max-width:92%;text-align:center}#ts.on{opacity:1;transform:translate(-50%,0)}
 .r{display:flex;justify-content:space-between;gap:8px;align-items:center;word-break:break-all;padding:6px 0}.r .b{width:auto;padding:8px 12px;font-size:13px;margin:0}
+.bd{display:inline-flex;align-items:center;gap:4px;padding:2px 9px 2px 7px;border-radius:20px;font-size:11px;font-weight:800;letter-spacing:.8px;vertical-align:middle;margin-left:6px}
+.bd.v1{background:linear-gradient(135deg,#f6dc8d,#c79a3b);color:#2a1d02;box-shadow:0 0 10px rgba(240,210,122,.45)}
+.bd.v2{background:linear-gradient(135deg,#eafff6,#7df0bd 50%,#2dd89a);color:#02241a;box-shadow:0 0 12px rgba(125,240,189,.6)}
+.bd.s{padding:1px 7px;font-size:10px}
+.mine{text-align:center;padding:18px 14px;background:radial-gradient(90% 60% at 50% 0,rgba(45,255,160,.15),transparent 70%),linear-gradient(160deg,#0a1f15,#050e09)}
+.st{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:20px;font-size:11px;font-weight:800;letter-spacing:1.5px;border:1px solid var(--ln);color:var(--mu)}
+.st.on{color:var(--a);border-color:rgba(45,255,160,.5);box-shadow:0 0 14px rgba(45,255,160,.25)}
+.ringw{position:relative;width:min(76vw,290px);aspect-ratio:1;margin:14px auto}
+.ring{width:100%;height:100%;transform:rotate(-90deg)}
+.rb{fill:none;stroke:#0f2a1d;stroke-width:10}
+.rf{fill:none;stroke:url(#gr);stroke-width:10;stroke-linecap:round;stroke-dasharray:553;stroke-dashoffset:553;transition:stroke-dashoffset .3s;filter:drop-shadow(0 0 6px rgba(45,255,160,.7))}
+.rin{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}.rin .big{font-size:clamp(22px,7vw,30px);margin:4px 0}
+.coin3{perspective:400px;height:54px}.coin3 svg{animation:sp 5s linear infinite}@keyframes sp{to{transform:rotateY(360deg)}}
+.stat3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:6px 0 12px}.stat3>div{background:#06120b;border:1px solid var(--ln);border-radius:12px;padding:9px 4px}.stat3 span{display:block;color:var(--mu);font-size:10px;letter-spacing:1px;text-transform:uppercase}.stat3 b{font-size:15px}
+.vcard{position:relative;overflow:hidden;border-radius:20px;padding:18px;aspect-ratio:1.586/1;min-height:200px;color:#eafff3;background:radial-gradient(120% 120% at 100% 0,#16c47a 0,transparent 55%),linear-gradient(135deg,#052e1c 0,#0a5a37 45%,#031a10 100%);border:1px solid rgba(240,210,122,.4);box-shadow:0 14px 40px rgba(0,0,0,.6),0 0 30px rgba(45,255,160,.12);display:flex;flex-direction:column;justify-content:space-between;margin-bottom:12px}
+.vcard::before{content:"";position:absolute;inset:0;background:repeating-conic-gradient(from 0deg at 100% 0,rgba(255,255,255,.05) 0 1deg,transparent 1deg 12deg),repeating-radial-gradient(circle at 100% 0,rgba(255,255,255,.05) 0 1px,transparent 1px 30px)}
+.vcard.v1{border-color:rgba(240,210,122,.85)}.vcard.v2{background:radial-gradient(120% 120% at 100% 0,#a8f7d6 0,transparent 50%),linear-gradient(135deg,#0b3b28 0,#16825a 40%,#06241a 100%);border-color:#d8f5e8}
+.sh{position:absolute;inset:0;background:linear-gradient(115deg,transparent 40%,rgba(255,255,255,.15) 50%,transparent 60%);transform:translateX(-100%);animation:sh 5s infinite}@keyframes sh{60%,100%{transform:translateX(100%)}}
+.vr{display:flex;justify-content:space-between;align-items:center;position:relative}
+.vbrand{font-weight:800;letter-spacing:3px;font-size:13px;color:var(--gd)}
+.vl{font-size:9px;letter-spacing:1.5px;color:#9fd6b8}.vn{font-size:13px;font-weight:700;letter-spacing:1px;text-transform:uppercase;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vamt{font-size:clamp(24px,8vw,32px);font-weight:800;text-shadow:0 2px 10px rgba(0,0,0,.45);font-variant-numeric:tabular-nums;position:relative}
+.vno{font-family:ui-monospace,Menlo,monospace;letter-spacing:2.5px;font-size:15px;color:#d9fbe9;text-shadow:0 1px 0 rgba(0,0,0,.5);position:relative}
+.vcard>div{position:relative}
+.sg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:4px;background:#06120b;border:1px solid var(--ln);border-radius:14px;padding:4px;margin-bottom:10px}
+.sg a{padding:10px 0;text-align:center;border-radius:10px;color:var(--mu);font-weight:700;font-size:13px}.sg a.on{background:linear-gradient(135deg,#2dffa0,#0fd47a);color:#02140a}
+.tier{border-radius:16px;padding:16px;margin-bottom:10px}
+.tier.t1{background:linear-gradient(145deg,#1d1606,#0a0803);border:1px solid #c79a3b;box-shadow:0 0 22px rgba(240,210,122,.1)}
+.tier.t2{background:linear-gradient(145deg,#06241a,#030f0a);border:1px solid #7df0bd;box-shadow:0 0 24px rgba(125,240,189,.15)}
+.tier ul{list-style:none;padding:0;margin:10px 0}.tier li{padding:3px 0;color:#d9fbe9}
 @media(prefers-reduced-motion:reduce){*{animation:none!important}}
 </style></head><body><div id="app"><p class="m" style="padding:40px;text-align:center">Loading…</p></div><div id="ts"></div><nav id="nav"></nav>
 <script>
 const T=Telegram.WebApp,$=s=>document.getElementById(s);T.ready();T.expand();try{T.setHeaderColor('#070d0a');T.setBackgroundColor('#070d0a')}catch(e){}
 const ADM=['al','as','at','ae','ad','ap','aw','ao','aa','au','ab','ag'];
 let S,off=0,tab='h',AD=0,pb=null,HI=null,BD=null;
-const CN='<svg class="cn" viewBox="0 0 64 64" width="64" height="64"><circle cx="32" cy="32" r="29" fill="#39ff88"/><circle cx="32" cy="32" r="23" fill="none" stroke="#03140a" stroke-opacity=".5" stroke-width="2"/><path d="M32 16v32M20 22l24 20M44 22L20 42" stroke="#03140a" stroke-width="2.5" stroke-linecap="round"/></svg>';
+const CN='<svg viewBox="0 0 64 64" width="52" height="52"><defs><radialGradient id="cg" cx=".35" cy=".3"><stop offset="0" stop-color="#7dffc4"/><stop offset="1" stop-color="#0a8a52"/></radialGradient></defs><circle cx="32" cy="32" r="29" fill="url(#cg)" stroke="#f0d27a" stroke-width="3"/><circle cx="32" cy="32" r="23" fill="none" stroke="#03140a" stroke-opacity=".45" stroke-width="2"/><path d="M32 16v32M20 22l24 20M44 22L20 42" stroke="#03140a" stroke-width="2.5" stroke-linecap="round"/></svg>';
+let wsub='s';const OKM={sd:'Sent ✓',bv:'Badge activated ★',wd:'Withdrawal requested',pr:'Promo submitted',vo:'Order submitted for review',ms:'Mining started'};
+const bdg=(l,sm)=>l?'<span class="bd v'+l+(sm?' s':'')+'">'+(l>1?'<svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor"><path d="M12 2l9 8-9 12L3 10z"/></svg>VVIP':'<svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M3 18h18l1-11-5 4-5-7-5 7-5-4z"/></svg>VIP')+'</span>':'';
+const fm=n=>(+n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}),fk=n=>(+n).toLocaleString('en-US'),cno=i=>String(i).padStart(16,'0').replace(/(.{4})/g,'$1 ').trim();
 const toast=m=>{const e=$('ts');e.textContent=m;e.className='on';clearTimeout(toast.t);toast.t=setTimeout(()=>{e.className=''},2600)};
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>'&#'+c.charCodeAt(0)+';'),f=n=>(+n).toFixed(2),host=u=>String(u).replace(/^https?:[/][/]/,'').split('/')[0];
 const api=async(a,d)=>{try{const r=await(await fetch('/api',{method:'POST',body:JSON.stringify(Object.assign({i:T.initData},d||{},{a:a}))})).json();if(r.e){toast(r.e);return null}return r}catch(e){toast('Network error');return null}};
 const act=async(a,d)=>{const b0=S?S.u.b:0,r=await api(a,d);if(!r)return;
 if(ADM.indexOf(a)>-1){AD=r;if(a=='as'){await act('me');return}}
 else{S=r;off=r.now-Date.now();if(a!='me')HI=null;if(a=='vo')BD=null}
-render();if(S&&S.u.b>b0+1e-9&&['mc','tc','rc','sc'].indexOf(a)>-1){toast('+'+f(S.u.b-b0)+' SPC');try{T.HapticFeedback.notificationOccurred('success')}catch(e){}}};
-const L={rate:'Mining SPC / day',minc:'Min claim',refrw:'Referral reward',secs:'Task wait seconds (min 30)',dtr:'Default daily task reward',prw:'Promoted task reward',wd:'Withdraw (1 on, 0 off)',minw:'Min withdraw',ch:'Required channels (@a,@b)',dep:'USDT BEP20 deposit address',wl:'Withdraw address label',vp1:'VIP USDT',vp2:'VVIP USDT',vc:'VIP coin price',vr:'VIP SPC/day',disc:'VIP promo discount %',mins:'Min send',srw:'Story reward',sm:'Story image URL (https)',rmn:'Rich man slots/day',rmh:'Rich man hours'};
-function home(){const u=S.u,m=u.mst;return '<div class="c"><span class="m">'+(m?'<i class="pl"></i>Mining live · ':'Mining · ')+S.er+' SPC / day</span><div class="big" id="mn">0.000000</div><div class="pb"><i id="pg"></i></div><span class="m">Claim opens at '+S.c.minc+' SPC</span><br><br>'+(m?'<button class="b" id="cb" data-a="mc" disabled>Claim</button>':'<button class="b" data-a="ms">▶ Start mining</button>')+'</div><p class="m" style="text-align:center">Support @{{AU}}</p>'}
+render();if(S&&S.u.b>b0+1e-9&&['mc','tc','rc','sc'].indexOf(a)>-1){toast('+'+f(S.u.b-b0)+' SPC');try{T.HapticFeedback.notificationOccurred('success')}catch(e){}}else if(OKM[a])toast(OKM[a])};
+const L={rate:'Mining SPC / day',minc:'Min claim',refrw:'Referral reward',secs:'Task wait seconds (min 30)',dtr:'Default daily task reward',prw:'Promoted task reward',wd:'Withdraw (1 on, 0 off)',minw:'Min withdraw',ch:'Required channels (@a,@b)',dep:'USDT BEP20 deposit address',wl:'Withdraw address label',vp1:'VIP USDT',vp2:'VVIP USDT',vc:'VIP coin price',vc2:'VVIP coin price',vr:'VIP SPC/day',disc:'VIP promo discount %',mins:'Min send',srw:'Story reward',sm:'Story image URL (https)',rmn:'Rich man slots/day',rmh:'Rich man hours'};
+function home(){const u=S.u,m=u.mst;
+return '<div class="c mine"><span class="st'+(m?' on':'')+'">'+(m?'<i class="pl"></i>MINING LIVE':'● IDLE')+'</span>'+(S.lv?'<div class="m" style="margin-top:8px">'+bdg(S.lv)+' boost active</div>':'')+'<div class="ringw"><svg class="ring" viewBox="0 0 200 200"><defs><linearGradient id="gr" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2dffa0"/><stop offset="1" stop-color="#f0d27a"/></linearGradient></defs><circle class="rb" cx="100" cy="100" r="88"/><circle class="rf" id="rg" cx="100" cy="100" r="88"/></svg><div class="rin"><div class="coin3">'+CN+'</div><div class="big" id="mn">0.000000</div><span class="m" id="pc">SPC mined</span></div></div><div class="stat3"><div><span>Per day</span><b>'+S.er+'</b></div><div><span>Per hour</span><b>'+(S.er/24).toFixed(2)+'</b></div><div><span>Min claim</span><b>'+S.c.minc+'</b></div></div>'+(m?'<button class="b" id="cb" data-a="mc" disabled>Claim SPC</button>':'<button class="b" data-a="ms">▶ Start mining</button>')+'</div><p class="m" style="text-align:center">Support @{{AU}}</p>'}
 function story(){if(!S.c.sm)return '';const u=S.u,n=Date.now()+off,wt=u.sl&&n-u.sl<6048e5,rem=u.ss?Math.ceil(S.c.secs-(n-u.ss)/1e3):0;
 return '<div class="c"><b>Telegram story</b><p class="m">Post a story and earn '+S.c.srw+' SPC, once every 7 days.</p>'+(wt?'<button class="b" disabled>Next in '+Math.ceil((6048e5-(n-u.sl))/864e5)+'d</button>':!u.ss?'<button class="b" data-a="sv">Post story</button>':rem>0?'<button class="b" disabled>⏳ '+rem+'s</button>':'<button class="b" data-a="sc">Claim '+S.c.srw+'</button>')+'</div>'}
 function tl(){const R=k=>{const rem=k.s?Math.ceil(S.c.secs-(Date.now()+off-k.s)/1e3):0;
@@ -408,15 +443,24 @@ let x='<div class="c"><b>👥 Earn '+S.c.refrw+' 🕷 per referral</b><p class="
 x+='<div class="c"><div class="g"><div><span class="m">Referrals</span><div class="big">'+S.rf+'</div></div><div><span class="m">Claimable</span><div class="big">'+f(u.p)+'</div></div></div><button class="b" data-a="rc"'+(u.p>0?'':' disabled')+'>Claim '+f(u.p)+'</button></div>';
 if(u.r&&!u.c)x+='<div class="c"><b>Join to activate your referrer</b>'+String(S.c.ch).split(',').filter(Boolean).map(h=>'<p><a data-a="ol" data-l="https://t.me/'+esc(h.trim().replace('@',''))+'" style="color:var(--a)">'+esc(h.trim())+'</a></p>').join('')+'<button class="b" data-a="ck">Verify</button></div>';
 return x}
+function card(){const u=S.u,v=S.lv;
+return '<div class="vcard'+(v?' v'+v:'')+'"><div class="sh"></div><div class="vr"><span class="vbrand">SPIDER COIN</span>'+(v?bdg(v):'<span class="vl">STANDARD</span>')+'</div><div class="vr"><svg viewBox="0 0 44 34" width="44" height="34"><rect width="44" height="34" rx="6" fill="#e5c76b"/><path d="M0 11h14M0 23h14M30 11h14M30 23h14M14 0v34M30 0v34" stroke="#9a7424" stroke-width="1.2" fill="none"/><rect x="14" y="9" width="16" height="16" rx="3" fill="none" stroke="#9a7424" stroke-width="1.2"/></svg><svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#d9fbe9" stroke-width="2" stroke-linecap="round" opacity=".8"><path d="M8 8a6 6 0 010 8M12 5a10 10 0 010 14M16 2a14 14 0 010 20"/></svg></div><div><div class="vl">AVAILABLE BALANCE</div><div class="vamt">'+fm(u.b)+' <small style="font-size:13px;color:var(--gd)">SPC</small></div></div><div class="vno">'+cno(u.id)+'</div><div class="vr"><div><div class="vl">CARD HOLDER</div><div class="vn">'+esc(u.n)+'</div></div><div><div class="vl">VALID THRU</div><div class="vn">'+(v?'LIFETIME':'12/99')+'</div></div><svg viewBox="0 0 48 30" width="48" height="30"><circle cx="17" cy="15" r="13" fill="#2dffa0" fill-opacity=".85"/><circle cx="31" cy="15" r="13" fill="#f0d27a" fill-opacity=".85"/></svg></div></div>'}
+function tier(n,price,usdt,perks,v){const own=v>=n;return '<div class="tier t'+n+'"><div class="r" style="padding:0"><b style="font-size:19px;color:'+(n>1?'#7df0bd':'#f0d27a')+'">'+(n>1?'VVIP':'VIP')+'</b>'+bdg(n)+'</div><ul>'+perks.map(p=>'<li>✓ '+p+'</li>').join('')+'</ul>'+(own?'<button class="b" disabled>Active ✓</button>':'<button class="b'+(n<2?' gd':'')+'" data-a="bv" data-k="v'+n+'">Buy · '+fk(price)+' coins</button>')+'<p class="m" style="margin-top:6px">or '+usdt+' USDT (form below)</p></div>'}
 function wallet(){const u=S.u,v=S.lv,K={mc:'Mining',task:'Task',referral:'Referral',sent:'Sent',received:'Received',promo:'Promo',vip:'VIP',withdraw:'Withdraw',refund:'Refund',story:'Story',admin:'Admin'};
-let x='<div class="c" style="text-align:center"><div class="cs">'+CN+CN+CN+'</div><span class="m">Balance (SPC)</span><div class="big">'+f(u.b)+'</div></div>';
-x+='<div class="c" data-f><b>Send SPC</b><input name="to" placeholder="@username"><input name="amt" type="number" step="any" placeholder="Min '+S.c.mins+'"><button class="b" data-a="sd">Send</button></div>';
-x+=S.c.wd=='1'?'<div class="c" data-f><b>Withdraw</b><p class="m">Requests are reviewed and paid manually by an admin.'+(v>1?' VVIP: priority review.':'')+'</p><input name="amt" type="number" step="any" placeholder="Min '+S.c.minw+'"><input name="ad" placeholder="'+esc(S.c.wl)+'"><button class="b" data-a="wd">Withdraw</button></div>':'<div class="c" style="text-align:center"><b>Withdrawal Start in 2027</b></div>';
-x+='<div class="c" data-f><b>★ VIP badge</b><p class="m">VIP: mining '+S.c.vr+' SPC/day and '+S.c.disc+'% off coin promos. VVIP: also 1 free 1k promo every month and priority withdraw. Permanent badge.</p>'+(v?'<p>Active: '+(v>1?'VVIP':'VIP')+' (permanent)</p>':'')+'<button class="b" data-a="bv"'+(v>0?' disabled':'')+'>VIP · '+S.c.vc+' coins</button><select name="k"><option value="v1">VIP · '+S.c.vp1+' USDT</option><option value="v2">VVIP · '+S.c.vp2+' USDT</option></select><input name="tx" placeholder="USDT TX hash"><p class="m">USDT BEP20: '+esc(S.c.dep||'coming soon')+'<br>USDT orders are reviewed manually by an admin.</p><button class="b" data-a="vo">Buy with USDT</button></div>';
-const hs=HI||[];return x+'<div class="c"><b>Wallet history</b>'+(hs.length?hs.map(h=>'<div class="r" style="border-bottom:1px solid var(--ln)"><span>'+(K[h.k]||esc(h.k))+(h.n?' · '+esc(h.n):'')+'<br><span class="m">'+new Date(h.ts).toLocaleString()+'</span></span><b style="color:'+(h.amt<0?'var(--rd)':'var(--a)')+'">'+(h.amt>0?'+':'')+f(h.amt)+'</b></div>').join(''):'<p class="m">No activity yet</p>')+'</div>'}
+let x=card()+'<div class="sg">'+[['s','Send'],['w','Withdraw'],['v','VIP'],['h','History']].map(t=>'<a data-a="ws" data-s="'+t[0]+'" class="'+(wsub==t[0]?'on':'')+'">'+t[1]+'</a>').join('')+'</div>';
+if(wsub=='s'){
+x+='<div class="c"><b>Your ID</b><div class="r"><span style="font-family:ui-monospace,monospace;font-size:18px;color:var(--a)">'+u.id+(u.un?'<br><span class="m">@'+esc(u.un)+'</span>':'')+'</span><button class="b" data-a="cp" data-l="'+u.id+'">Copy ID</button></div><p class="m">Share your ID so others can send you SPC.</p></div>';
+x+='<div class="c" data-f><b>Send SPC</b><input name="to" placeholder="@username or Telegram ID" autocomplete="off"><input name="amt" type="number" step="any" placeholder="Amount (min '+S.c.mins+')"><button class="b" data-a="sd">Send</button><p class="m">The receiver must have opened the app once.</p></div>'}
+else if(wsub=='w'){
+x+=S.c.wd=='1'?'<div class="c" data-f><b>Withdraw</b><p class="m">Requests are reviewed and paid manually by an admin.'+(v>1?' VVIP: priority review.':'')+'</p><input name="amt" type="number" step="any" placeholder="Min '+S.c.minw+'"><input name="ad" placeholder="'+esc(S.c.wl)+'"><button class="b" data-a="wd">Withdraw</button></div>':'<div class="c" style="text-align:center;padding:30px 14px"><div style="font-size:36px">🔒</div><b style="font-size:17px;color:var(--gd)">Withdrawal Start in 2027</b></div>'}
+else if(wsub=='v'){
+x+=tier(1,S.c.vc,S.c.vp1,['Mining '+S.c.vr+' SPC/day','-'+S.c.disc+'% on coin promos','Gold VIP badge','Permanent'],v)+tier(2,S.c.vc2,S.c.vp2,['Everything in VIP','1 free 1k-visit promo every month','Priority withdrawal review','Premium VVIP badge'],v);
+x+='<div class="c" data-f><b>Pay with USDT (BEP20)</b><select name="k"><option value="v1">VIP · '+S.c.vp1+' USDT</option><option value="v2">VVIP · '+S.c.vp2+' USDT</option></select><input name="tx" placeholder="USDT TX hash (0x...)"><p class="m">Address: '+esc(S.c.dep||'coming soon')+'<br>Reviewed manually by an admin.</p><button class="b" data-a="vo">Submit USDT order</button></div>'}
+else{const hs=HI||[];x+='<div class="c"><b>Wallet history</b>'+(hs.length?hs.map(h=>'<div class="r" style="border-bottom:1px solid var(--ln)"><span>'+(K[h.k]||esc(h.k))+(h.n?' · '+esc(h.n):'')+'<br><span class="m">'+new Date(h.ts).toLocaleString()+'</span></span><b style="color:'+(h.amt<0?'var(--rd)':'var(--a)')+'">'+(h.amt>0?'+':'')+f(h.amt)+'</b></div>').join(''):'<p class="m">No activity yet</p>')+'</div>'}
+return x}
 function board(){const B=BD||{lb:[],rm:[]};
-return '<div class="c"><b>★ Rich men</b><p class="m">Donate 1 USDT to show your name here for '+S.c.rmh+'h. Max '+S.c.rmn+' per day. Reviewed manually by an admin.</p>'+B.rm.map(r=>'<div class="r"><b>'+esc(r.n)+'</b><span class="m">'+(r.un?'@'+esc(r.un):'')+'</span></div>').join('')+'<div data-f><input name="tx" placeholder="USDT TX hash"><p class="m">USDT BEP20: '+esc(S.c.dep||'coming soon')+'</p><button class="b" data-a="vo" data-k="rm">Donate 1 USDT</button></div></div><div class="c"><b>Top 100</b><p class="m">Ranked by VIP, referrals, then coins.</p>'+B.lb.map((r,i)=>'<div class="r" style="border-bottom:1px solid var(--ln)"><span><b>#'+(i+1)+'</b> '+esc(r.n)+(r.lv?' ★'+(r.lv>1?'VVIP':'VIP'):'')+'<br><span class="m">'+r.rc+' refs</span></span><b>'+f(r.b)+'</b></div>').join('')+'</div>'}
-function ld(){if(tab=='w'&&!HI){HI=[];api('hi').then(r=>{if(r){HI=r.h;render()}else HI=null})}else if(tab=='b'&&!BD){BD={lb:[],rm:[]};api('lb').then(r=>{if(r){BD=r;render()}else BD=null})}}
+return '<div class="c"><b>★ Rich men</b><p class="m">Donate 1 USDT to show your name here for '+S.c.rmh+'h. Max '+S.c.rmn+' per day. Reviewed manually by an admin.</p>'+B.rm.map(r=>'<div class="r"><b>'+esc(r.n)+'</b><span class="m">'+(r.un?'@'+esc(r.un):'')+'</span></div>').join('')+'<div data-f><input name="tx" placeholder="USDT TX hash"><p class="m">USDT BEP20: '+esc(S.c.dep||'coming soon')+'</p><button class="b" data-a="vo" data-k="rm">Donate 1 USDT</button></div></div><div class="c"><b>Top 100</b><p class="m">Ranked by VIP, referrals, then coins.</p>'+B.lb.map((r,i)=>'<div class="r" style="border-bottom:1px solid var(--ln)"><span><b>#'+(i+1)+'</b> '+esc(r.n)+bdg(r.lv,1)+'<br><span class="m">'+r.rc+' refs</span></span><b>'+f(r.b)+'</b></div>').join('')+'</div>'}
+function ld(){if(tab=='w'&&wsub=='h'&&!HI){HI=[];api('hi').then(r=>{if(r){HI=r.h;render()}else HI=null})}else if(tab=='b'&&!BD){BD={lb:[],rm:[]};api('lb').then(r=>{if(r){BD=r;render()}else BD=null})}}
 function admin(){if(!AD||!AD.c){if(!AD){AD=1;act('al')}return '<p class="m">Loading…</p>'}
 const bt=(a,id,ok,t,x)=>'<button class="b'+(x?' x':'')+'" data-a="'+a+'" data-id="'+id+'" data-ok="'+ok+'">'+t+'</button>';
 let x='<div class="c"><b>🛠 Admin</b> <span class="m">Users: '+AD.n+'</span></div><div class="c" data-f><b>Settings</b>'+Object.keys(L).map(k=>'<span class="m">'+L[k]+'</span><input name="'+k+'" value="'+esc(AD.c[k])+'">').join('')+'<button class="b" data-a="as">Save</button></div>';
@@ -428,7 +472,7 @@ const U=AD.usr;x+='<div class="c"><b>Users</b><div data-f><input name="s" placeh
 x+='<div class="c"><b>Admins</b><div class="r"><span>'+AD.main+' · Main Admin</span></div>'+AD.ad.filter(z=>String(z.id)!=String(AD.main)).map(z=>'<div class="r"><span>'+z.id+'</span><button class="b x" data-a="aa" data-id="'+z.id+'" data-on="">✕</button></div>').join('')+'<div data-f><input name="id" type="number" placeholder="Telegram numeric ID"><button class="b" data-a="aa" data-on="1">Add admin</button></div></div>';
 return x}
 function render(){const u=S.u;
-$('app').innerHTML='<header><div class="av">'+esc(Array.from(u.n||'?')[0])+'</div><div class="tt"><b>'+esc(u.n)+(S.lv?' ★'+(S.lv>1?'VVIP':'VIP'):'')+'</b><span>ID '+u.id+(u.un?' · @'+esc(u.un):'')+'</span></div><div class="pill" id="bal">'+f(u.b)+'</div></header><div class="pg">'+({h:home,t:tasks,r:refer,b:board,w:wallet,a:admin})[tab]()+'</div>';
+$('app').innerHTML='<header><div class="av">'+esc(Array.from(u.n||'?')[0])+'</div><div class="tt"><b>'+esc(u.n)+bdg(S.lv,1)+'</b><span>ID '+u.id+(u.un?' · @'+esc(u.un):'')+'</span></div><div class="pill" id="bal">'+f(u.b)+'</div></header><div class="pg">'+({h:home,t:tasks,r:refer,b:board,w:wallet,a:admin})[tab]()+'</div>';
 const IC={h:'<path d="M13 2L4 14h7l-1 8 9-12h-7z"/>',t:'<circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/>',r:'<circle cx="10" cy="8" r="3.5"/><path d="M3.5 20v-1a4 4 0 014-4h5a4 4 0 014 4v1"/>',b:'<path d="M5 20V10M12 20V4M19 20v-7"/>',w:'<rect x="3" y="6" width="18" height="13" rx="3"/><path d="M16 13h2"/>',a:'<circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/>'};
 const tb=[['h','Mine'],['t','Tasks'],['r','Refer'],['b','Board'],['w','Wallet']];if(S.adm)tb.push(['a','Admin']);
 $('nav').innerHTML=tb.map(t=>'<a data-a="tab" data-t="'+t[0]+'" class="'+(tab==t[0]?'on':'')+'"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">'+IC[t[0]]+'</svg>'+t[1]+'</a>').join('');
@@ -440,8 +484,8 @@ else if(a=='v'){const l=d.url;if(l.indexOf('t.me/')>-1)T.openTelegramLink(l);els
 else if(a=='sv'){try{T.shareToStory(S.c.sm,{text:'Mine Spider Coin with me!',widget_link:{url:'https://t.me/'+S.bot+'?start=r'+S.u.id,name:'Spider Coin'}})}catch(e){}act('ss')}
 else if(a=='cp'){try{navigator.clipboard.writeText(d.l);toast('Copied')}catch(e){toast('Copy failed')}}
 else if(a=='sh')T.openTelegramLink('https://t.me/share/url?url='+encodeURIComponent(d.l)+'&text='+encodeURIComponent('Mine Spider Coin with me!'));
-else if(a=='ol')T.openTelegramLink(d.l);else act(a,d)};
-setInterval(()=>{const m=$('mn');if(m&&S){const u=S.u,v=u.mst?Math.min(Date.now()+off-u.mst,864e5)*S.er/864e5:0;m.textContent=v.toFixed(6);const b=$('cb');if(b)b.disabled=v<+S.c.minc;const g=$('pg');if(g)g.style.width=Math.min(100,v/+S.c.minc*100)+'%'}},100);
+else if(a=='ol')T.openTelegramLink(d.l);else if(a=='ws'){wsub=d.s;render()}else act(a,d)};
+setInterval(()=>{const m=$('mn');if(m&&S){const u=S.u,v=u.mst?Math.min(Date.now()+off-u.mst,864e5)*S.er/864e5:0;m.textContent=v.toFixed(6);const b=$('cb');if(b)b.disabled=v<+S.c.minc;const p=Math.min(1,v/+S.c.minc),g=$('rg');if(g)g.style.strokeDashoffset=553*(1-p);const pc=$('pc');if(pc)pc.textContent=u.mst?Math.floor(p*100)+'% to claim':'SPC mined'}},100);
 setInterval(()=>{if(S&&tab=='t'&&(S.tk.some(k=>k.s&&!k.dc&&Date.now()+off-k.s<S.c.secs*1e3+1e3)||S.u.ss&&Date.now()+off-S.u.ss<S.c.secs*1e3+1e3))render()},1000);
 act('me');
 </script></body></html>`;
