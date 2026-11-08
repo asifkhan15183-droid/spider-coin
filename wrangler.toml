@@ -1,4 +1,4 @@
-name = "spider-con"
+name = "spider-coin"
 main = "worker.js"
 compatibility_date = "2025-01-01"
 [[d1_databases]]
