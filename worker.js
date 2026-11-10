@@ -2,16 +2,32 @@
 // SPIDER COIN (SPC) - Telegram Mini App
 // Single-file Cloudflare Worker (frontend + backend) + D1 database
 // Bindings: D1 "DB" | Secrets: BOT_TOKEN, WEBHOOK_SECRET | Optional var: ADMIN_ID
+// Version 1.1: Error Logs, Admin button at the top, tab names (Home, Ranking)
 // =====================================================================
 const MAIN_ADMIN = "8825348718", ADMIN_USER = "Spider_Incom", BOT_USER = "SPC_Wallet_bot";
-const FOREVER = 4102444800000, SV = "6";
+const FOREVER = 4102444800000, SV = "7", APP_VERSION = "1.1";
 const DEF = { rate: 10, minc: 5, refrw: 200, secs: 30, prw: 9.23, wd: 0, minw: 1000, ch: "", dep: "", wl: "USDT BEP20 address", vp1: 2, vp2: 10, vc: 1e5, vc2: 5e5, vr: 20, disc: 5, mins: 1000, srw: 100, sm: "", dtr: 15, spc: 25000, spu: 2, stt: 2000000, wbr: 100, wbf: 0, str: "" };
 const NK = ["rate", "minc", "refrw", "secs", "prw", "minw", "vp1", "vp2", "vc", "vc2", "vr", "disc", "mins", "srw", "dtr", "spc", "spu", "stt", "wbr", "wbf"];
 const PL = { 1: { c: 5e3, v: 500, q: 0 }, 2: { c: 1e4, v: 1000, q: 0 }, 3: { c: 2e4, v: 1000, q: 1 } };
 const ADM = new Set(["al", "as", "at", "ae", "ad", "ap", "aw", "ao", "aa", "au", "ab", "ag", "sp", "sq", "so", "sx"]);
 const ROLE = { as: "cfg", at: "tk", ae: "tk", ad: "tk", ap: "tk", aw: "wd", ao: "od", au: "us", ab: "us", ag: "us", sp: "st", sq: "st", so: "st", sx: "main", aa: "main" };
 const J = (d, s = 200) => new Response(JSON.stringify(d), { status: s, headers: { "content-type": "application/json", "cache-control": "no-store" } });
-const tg = async (env, m, b) => { try { const r = await fetch("https://api.telegram.org/bot" + env.BOT_TOKEN + "/" + m, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(b) }); return await r.json() } catch (e) { return { ok: false } } };
+const tg = async (env, m, b) => { try { const r = await fetch("https://api.telegram.org/bot" + env.BOT_TOKEN + "/" + m, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(b) }); const j = await r.json(); if (j && j.ok === false && j.error_code !== 403) await logErr(env.DB, "bot", m, b && b.chat_id, "Telegram " + m + " failed: " + (j.description || j.error_code), "chat_id " + (b && b.chat_id)); return j } catch (e) { await logErr(env.DB, "bot", m, b && b.chat_id, e); return { ok: false } } };
+
+// ---------------------------------------------------------------- error log (Admin > Error Logs)
+// Saves a problem with time, action, user and stack trace (line numbers). Same problem = one row with a counter.
+async function logErr(db, src, act, uid, err, extra) {
+  try {
+    if (!db) return;
+    await init(db);
+    const msg = String((err && err.message) || err || "Unknown error").slice(0, 300);
+    const stk = String(extra !== undefined ? extra : (err && err.stack) || "").slice(0, 900);
+    const loc = (stk.match(/([A-Za-z0-9_.\/-]+):([0-9]+):([0-9]+)/) || [""])[0];
+    const sig = (src + "|" + act + "|" + msg + "|" + loc).slice(0, 400), now = Date.now();
+    await db.prepare("INSERT INTO el(sig,src,act,u,msg,stk,n,ts,ls) VALUES(?,?,?,?,?,?,1,?,?) ON CONFLICT(sig) DO UPDATE SET n=n+1,ls=excluded.ls,u=excluded.u").bind(sig, String(src), String(act || "").slice(0, 20), Number(uid) || 0, msg, stk, now, now).run();
+    await db.prepare("DELETE FROM el WHERE id IN (SELECT id FROM el ORDER BY ls DESC LIMIT -1 OFFSET 200)").run();
+  } catch (e) { }
+}
 let READY = false, CC = { t: 0, d: null }, LB = { t: 0, d: null }, MK = { t: 0, d: null };
 
 // ---------------------------------------------------------------- schema
@@ -35,7 +51,8 @@ async function init(db) {
       db.prepare("CREATE TABLE IF NOT EXISTS inv(no TEXT PRIMARY KEY,u INTEGER,q INTEGER,pu REAL,cu TEXT,tot REAL,pm TEXT,tx TEXT,st TEXT,ts INTEGER,nm TEXT,un TEXT,lv INTEGER DEFAULT 0)"),
       db.prepare("CREATE TABLE IF NOT EXISTS stl(id INTEGER PRIMARY KEY AUTOINCREMENT,u INTEGER,k TEXT,q INTEGER,n TEXT,ts INTEGER)"),
       db.prepare("CREATE TABLE IF NOT EXISTS pl(id INTEGER PRIMARY KEY AUTOINCREMENT,no TEXT UNIQUE,k TEXT,pps REAL,nt TEXT,hold INTEGER,tot REAL,ts INTEGER,aid INTEGER)"),
-      db.prepare("CREATE TABLE IF NOT EXISTS wb(u INTEGER,y TEXT,PRIMARY KEY(u,y))")]);
+      db.prepare("CREATE TABLE IF NOT EXISTS wb(u INTEGER,y TEXT,PRIMARY KEY(u,y))"),
+      db.prepare("CREATE TABLE IF NOT EXISTS el(id INTEGER PRIMARY KEY AUTOINCREMENT,sig TEXT UNIQUE,src TEXT,act TEXT,u INTEGER DEFAULT 0,msg TEXT,stk TEXT,n INTEGER DEFAULT 1,ts INTEGER,ls INTEGER)")]);
     const addCols = async (tbl, list) => {
       const cols = ((await db.prepare("PRAGMA table_info(" + tbl + ")").all()).results || []).map(r => r.name);
       for (const [n, t] of list) if (!cols.includes(n)) { try { await db.prepare("ALTER TABLE " + tbl + " ADD COLUMN " + n + " " + t).run() } catch (e) { } }
@@ -59,6 +76,7 @@ async function init(db) {
       db.prepare("CREATE INDEX IF NOT EXISTS invu ON inv(u,ts)"),
       db.prepare("CREATE INDEX IF NOT EXISTS invs ON inv(st,pm,ts)"),
       db.prepare("CREATE INDEX IF NOT EXISTS stlu ON stl(u,id)"),
+      db.prepare("CREATE INDEX IF NOT EXISTS els ON el(ls)"),
       db.prepare("INSERT OR IGNORE INTO s(k,v) VALUES('_sold','0')"),
       db.prepare("INSERT OR REPLACE INTO s(k,v) VALUES('_sv',?)").bind(SV)]);
   }
@@ -99,6 +117,7 @@ export default {
         if (!env.WEBHOOK_SECRET || rq.headers.get("x-telegram-bot-api-secret-token") !== env.WEBHOOK_SECRET) return new Response("forbidden", { status: 403 });
         let up; try { up = await rq.json() } catch (e) { return new Response("ok") }
         const m = up.message;
+        try {
         if (m && m.text && m.from && m.chat && m.chat.type == "private" && /^\/start(@\w+)?(\s|$)/.test(m.text)) {
           await init(db);
           const prm = m.text.split(/\s+/)[1] || ""; let r = /^r[0-9]{1,15}$/.test(prm) ? +prm.slice(1) : 0;
@@ -108,12 +127,21 @@ export default {
             db.prepare("UPDATE u SET r=? WHERE id=? AND r=0 AND rg=0 AND ?>0").bind(r, m.from.id, r)]);
           await tg(env, "sendMessage", { chat_id: m.chat.id, text: "🕷 Welcome to Spider Coin! Mine, complete tasks and invite friends.", reply_markup: { inline_keyboard: [[{ text: "🕸 Open App", web_app: { url: U.origin + "/app" } }]] } });
         }
+        } catch (e) { await logErr(db, "server", "webhook", 0, e) }
         return new Response("ok");
       }
-      if (U.pathname == "/api" && rq.method == "POST") return await run(rq, env);
+      if (U.pathname == "/api" && rq.method == "POST") {
+        const rc = rq.clone();
+        try { return await run(rq, env) } catch (e) {
+          let a = "", uid = 0;
+          try { const q = await rc.json(); a = String(q.a || "").slice(0, 12); uid = Number(JSON.parse(new URLSearchParams(String(q.i || "")).get("user") || "{}").id) || 0 } catch (e2) { }
+          await logErr(db, "server", a, uid, e);
+          return J({ e: "Server error. Please try again." }, 500);
+        }
+      }
       if (U.pathname == "/invoice" && rq.method == "GET") return await invoice(U, env);
-      return new Response(HTML.replace("{{AU}}", ADMIN_USER), { headers: { "content-type": "text/html;charset=UTF-8", "cache-control": "no-store" } });
-    } catch (e) { return J({ e: "Server error. Please try again." }, 500) }
+      return new Response(HTML.replace("{{AU}}", ADMIN_USER).replace("{{VER}}", APP_VERSION), { headers: { "content-type": "text/html;charset=UTF-8", "cache-control": "no-store" } });
+    } catch (e) { await logErr(env.DB, "server", "route", 0, e); return J({ e: "Server error. Please try again." }, 500) }
   }
 };
 
@@ -144,6 +172,17 @@ async function run(rq, env) {
   const adm = String(id) == MAIN || u.isa == 1;
   const isMain = String(id) == MAIN, roles = new Set(String(u.arl || "").split(",")), can = r => isMain || (r !== "main" && roles.has(r));
   if (u.bn && !adm) return E("Your account is blocked");
+  if (a == "ce") {
+    const l = Math.floor(+q.l) || 0, cl = Math.floor(+q.c) || 0, m = String(q.m || "").slice(0, 300), t = String(q.t || "").slice(0, 3);
+    if (m && !/^Script error/i.test(m)) await logErr(db, "client", "ui:" + t, id, m, "@" + l + ":" + cl + "\n" + String(q.st || "").slice(0, 700));
+    return J({ ok: 1 });
+  }
+  if (a == "lg" || a == "lc" || a == "lt") {
+    if (!adm || !can("lg")) return E("You do not have permission for this action");
+    if (a == "lt") throw new Error("Test error created by the admin button");
+    if (a == "lc") { await X("DELETE FROM el"); return J({ lg: [] }) }
+    return J({ lg: (await P("SELECT id,src,act,u,msg,stk,n,ts,ls FROM el ORDER BY ls DESC LIMIT 60").all()).results });
+  }
   const lv = u.vx > now ? u.vl : 0, er = lv ? N("vr") : N("rate");
 
   if (a == "hi") return J({ h: (await P("SELECT k,amt,ts,n FROM h WHERE u=? ORDER BY id DESC LIMIT 50", id).all()).results });
@@ -236,7 +275,7 @@ async function run(rq, env) {
         if (!(tid > 0)) return E("Enter a numeric Telegram ID");
         if (String(tid) == MAIN) return E("Main admin cannot be changed");
         if (ON) {
-          const rl = [...new Set(String(q.rl || "").split(",").map(x => x.trim()).filter(x => ["cfg", "tk", "us", "wd", "od", "st"].includes(x)))];
+          const rl = [...new Set(String(q.rl || "").split(",").map(x => x.trim()).filter(x => ["cfg", "tk", "us", "wd", "od", "st", "lg"].includes(x)))];
           if (!rl.length) return E("Choose at least one role");
           await X("INSERT INTO admins(id,by,ts,rl) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET rl=excluded.rl", tid, id, now, rl.join(","));
         } else await X("DELETE FROM admins WHERE id=?", tid);
@@ -576,7 +615,7 @@ nav a{display:flex;flex-direction:column;align-items:center;gap:3px;padding:7px 
 header{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:10px;height:58px;margin:0 -12px;padding:0 12px;background:rgba(3,10,6,.94);backdrop-filter:blur(8px);border-bottom:1px solid var(--ln)}
 .av{flex:none;width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#2dffa0,#0a8a52);color:#02140a;display:grid;place-items:center;font-weight:800;border:2px solid var(--gd)}
 .tt{flex:1;min-width:0;display:flex;flex-direction:column}.tt b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.tt span{font-size:12px;color:var(--mu)}
-.pill{padding:6px 12px;border:1px solid var(--gd);border-radius:18px;font-weight:700;flex:none;font-variant-numeric:tabular-nums;color:var(--gd)}.pg{padding-top:12px}
+.pill{padding:6px 12px;border:1px solid var(--gd);border-radius:18px;font-weight:700;flex:none;font-variant-numeric:tabular-nums;color:var(--gd)}.pg{padding-top:12px}.gr{flex:none;width:36px;height:36px;border-radius:50%;border:1px solid var(--gd);color:var(--gd);display:grid;place-items:center;background:rgba(240,210,122,.06);cursor:pointer}.gr:active{transform:scale(.94)}
 .pl{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--a);animation:pl 1.2s infinite}@keyframes pl{50%{opacity:.25;transform:scale(1.6)}}
 .fi{animation:fi .22s}@keyframes fi{from{opacity:0;transform:translateY(8px)}}
 #ts{position:fixed;top:66px;left:50%;transform:translate(-50%,-16px);background:#0d2418;border:1px solid var(--a);padding:10px 16px;border-radius:20px;opacity:0;transition:.25s;pointer-events:none;z-index:9;font-weight:700;max-width:92%;text-align:center}#ts.on{opacity:1;transform:translate(-50%,0)}
@@ -637,6 +676,7 @@ textarea{width:100%;padding:12px;margin:5px 0;border-radius:12px;border:1px soli
 @media(prefers-reduced-motion:reduce){*{animation:none!important}}
 </style></head><body><div id="app"><p class="m" style="padding:40px;text-align:center">Loading…</p></div><div id="ts"></div><nav id="nav"></nav>
 <script>
+const VER='{{VER}}',GEAR='<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',CLOSE='<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>';
 const T=Telegram.WebApp,$=s=>document.getElementById(s);T.ready();T.expand();try{T.setHeaderColor('#070d0a');T.setBackgroundColor('#070d0a')}catch(e){}
 const ADM=['al','as','at','ae','ad','ap','aw','ao','aa','au','ab','ag','sp','sq','so','sx'];
 let S,off=0,tab='h',AD=0,pb=null,HI=null,BD=null,fsub='m',FM=null,FI=null;
@@ -711,11 +751,26 @@ function frules(){return '<div class="c"><b>📜 Stock rules</b><div class="rule
 function farm(){const TT=[['m','Market'],['b','Buy'],['s','Send'],['i','Invoices'],['r','Rules']];
 return fhero()+fmy()+'<div class="sg">'+TT.map(t=>'<a data-a="fs" data-s="'+t[0]+'" class="'+(fsub==t[0]?'on':'')+'">'+t[1]+'</a>').join('')+'</div>'+({m:fmarket,b:fbuy,s:fsend,i:finv,r:frules})[fsub]()+'<div class="disc"><b>Disclaimer:</b> SPC Farm Stock is a voluntary community investment. You take part entirely by your own free choice. Profit is not guaranteed and market values can go up or down. Due to technical reasons or any project problem, no individual or the project team is liable for any profit or loss.</div>'}
 function ld(){if(tab=='w'&&wsub=='h'&&!HI){HI=[];api('hi').then(r=>{if(r){HI=r.h;render()}else HI=null})}else if(tab=='b'&&!BD){BD={lb:[],rm:[]};api('lb').then(r=>{if(r){BD=r;render()}else BD=null})}else if(tab=='f'){if(!FM){FM=1;api('fm').then(r=>{FM=r?r.mk:null;if(r)render()})}if(fsub=='i'&&!FI){FI=1;api('fi').then(r=>{FI=r||null;if(r)render()})}}}
+let LG=null;
+function errlog(){
+let h='<div class="c"><b>Error Logs</b><p class="m">App v'+VER+'. Shows the latest problems with time, user and line number. Line numbers come from the deployed file and can differ a little.</p>';
+if(LG===null){h+='<button class="b" data-a="lg">Load logs</button>'}
+else{
+h+='<div class="r"><button class="b" data-a="lg">Refresh</button><button class="b x" data-a="lc">Clear all</button><button class="b" data-a="lt">Test error</button></div>';
+if(!LG.length)h+='<p class="m">No errors recorded.</p>';
+LG.forEach(function(e){
+const sk=String(e.stk||''),mt=sk.match(new RegExp('([A-Za-z0-9_./-]+):([0-9]+):([0-9]+)'));
+let ln='';
+if(e.src=='client'){const c0=sk.split(String.fromCharCode(10))[0].match(new RegExp('^@([0-9]+):([0-9]+)'));if(c0&&+c0[1])ln='Page script line '+c0[1]+':'+c0[2]+' (about worker.js line '+(+c0[1]+558)+')'}
+else if(mt)ln='Line '+mt[2]+':'+mt[3]+' ('+mt[1]+')';
+h+='<div style="border-top:1px solid var(--ln);padding:8px 0;word-break:break-word"><div><b>'+esc(e.src)+'</b> · '+esc(e.act||'-')+' · x'+e.n+'</div><div class="m">'+new Date(+e.ls).toLocaleString()+(e.u?' · user '+e.u:'')+'</div><div>'+esc(e.msg)+'</div>'+(ln?'<div class="m">'+esc(ln)+'</div>':'')+(sk?'<details><summary class="m">Details</summary><pre style="white-space:pre-wrap;font-size:11px;color:var(--mu)">'+esc(sk)+'</pre></details>':'')+'</div>'
+})}
+return h+'</div>'}
 function admin(){if(!AD||!AD.c){if(!AD){AD=1;act('al')}return '<p class="m">Loading…</p>'}
-const has=r=>AD.im||AD.rl.indexOf(r)>-1,RL=[['cfg','Settings'],['tk','Tasks'],['us','Users'],['wd','Withdrawals'],['od','Orders'],['st','Stock']];
+const has=r=>AD.im||AD.rl.indexOf(r)>-1,RL=[['cfg','Settings'],['tk','Tasks'],['us','Users'],['wd','Withdrawals'],['od','Orders'],['st','Stock'],['lg','Error Logs']];
 const bt=(a,id,ok,t,x)=>'<button class="b'+(x?' x':'')+'" data-a="'+a+'" data-id="'+id+'" data-ok="'+ok+'">'+t+'</button>';
 const cks=sel=>RL.map(r=>'<label class="ck"><input type="checkbox" value="'+r[0]+'"'+(sel.indexOf(r[0])>-1?' checked':'')+'>'+r[1]+'</label>').join('');
-let x='<div class="c"><b>🛠 Admin</b> <span class="m">Users: '+AD.n+' · '+(AD.im?'Main Admin':'Roles: '+AD.rl.join(', '))+'</span></div>';
+let x='<div class="c"><b>🛠 Admin</b> <span class="m">App v'+VER+' · Users: '+AD.n+' · '+(AD.im?'Main Admin':'Roles: '+AD.rl.join(', '))+'</span></div>';
 if(has('cfg'))x+='<div class="c" data-f><b>Settings</b>'+Object.keys(L).map(k=>'<span class="m">'+L[k]+'</span><input name="'+k+'" value="'+esc(AD.c[k])+'">').join('')+'<button class="b" data-a="as">Save</button></div>';
 if(has('tk')){x+='<div class="c"><b>Daily tasks (max 10)</b>'+AD.tk.filter(k=>!k.o&&k.st=='a').map(k=>'<div data-f style="border-bottom:1px solid var(--ln);padding:6px 0"><input name="url" value="'+esc(k.url)+'"><input name="rw" type="number" step="any" value="'+k.rw+'"><div class="g"><button class="b" data-a="ae" data-id="'+k.id+'">Save</button>'+bt('ad',k.id,'','Delete',1)+'</div></div>').join('')+'<div data-f><input name="url" placeholder="https://..."><input name="rw" type="number" step="any" placeholder="Reward (default '+esc(AD.c.dtr)+')"><button class="b" data-a="at">Add task</button></div></div>';
 x+='<div class="c"><b>Promo orders</b>'+AD.tk.filter(k=>k.o).map(k=>'<div class="r"><span>'+esc(k.url)+'<br><span class="m">owner '+k.o+' · left '+k.l+(k.st=='p'?' · '+esc(k.x):'')+'</span></span>'+(k.st=='p'?bt('ap',k.id,'1','✓')+bt('ap',k.id,'','✕',1):bt('ad',k.id,'','✕',1))+'</div>').join('')+'</div>'}
@@ -725,13 +780,14 @@ if(has('us')){const U=AD.usr;x+='<div class="c"><b>Users</b><div data-f><input n
 if(has('st')){x+='<div class="c" data-f><b>📈 Post market entry</b><p class="m">Profit pays coins to every holder instantly (stocks x amount). Loss is shown on the dashboard only.</p><select name="kd"><option value="p">Profit (pays coins)</option><option value="l">Loss (display only)</option></select><input name="pps" type="number" step="any" placeholder="Coins per stock"><input name="nt" placeholder="Note (visible to everyone)"><button class="b gd" data-a="sp">Post entry</button></div>';
 x+='<div class="c"><b>Stock USDT orders</b>'+AD.so.map(o=>'<div class="r"><span>'+esc(o.nm||o.u)+' · ID '+o.u+'<br><span class="m">'+o.q+' stock · '+fm(o.tot)+' USDT<br>'+esc(o.tx)+'</span></span><button class="b" data-a="so" data-no="'+esc(o.no)+'" data-ok="1">✓</button><button class="b x" data-a="so" data-no="'+esc(o.no)+'" data-ok="">✕</button></div>').join('')+'</div>';
 x+='<div class="c" data-f><b>Stock rules (visible to all)</b><textarea name="str" rows="7" placeholder="Write the stock rules here...">'+esc(AD.c.str)+'</textarea><button class="b" data-a="sq">Save rules</button></div>'}
+if(has('lg'))x+=errlog();
 if(AD.im){x+='<div class="c"><b>Stock holders sheet</b><p class="m">Name, numeric ID, badge, stocks and amount paid. Downloads a CSV and copies a table you can paste into Google Sheets.</p><button class="b gd" data-a="sx">Export holders</button></div>';
 x+='<div class="c"><b>Admins and roles</b><div class="r"><span>'+AD.main+' · Main Admin (all roles)</span></div>'+AD.ad.filter(z=>String(z.id)!=String(AD.main)).map(z=>'<div data-f style="border-top:1px solid var(--ln);padding:8px 0"><div class="r" style="padding:0"><b>'+z.id+'</b><button class="b x" data-a="aa" data-id="'+z.id+'" data-on="">Remove</button></div>'+cks(String(z.rl||'').split(','))+'<button class="b" data-a="aa" data-id="'+z.id+'" data-on="1">Save roles</button></div>').join('')+'<div data-f style="border-top:1px solid var(--ln);padding-top:8px"><input name="id" type="number" placeholder="Telegram numeric ID">'+cks(['cfg','tk','us','wd','od','st'])+'<button class="b" data-a="aa" data-on="1">Add admin</button></div></div>'}
 return x}
 function render(){const u=S.u;
-$('app').innerHTML='<header><div class="av">'+esc(Array.from(u.n||'?')[0])+'</div><div class="tt"><b>'+esc(u.n)+bdg(S.lv,1)+'</b><span>ID '+u.id+(u.un?' · @'+esc(u.un):'')+'</span></div><div class="pill" id="bal">'+f(u.b)+'</div></header><div class="pg">'+({h:home,t:tasks,f:farm,r:refer,b:board,w:wallet,a:admin})[tab]()+'</div>';
+$('app').innerHTML='<header><div class="av">'+esc(Array.from(u.n||'?')[0])+'</div><div class="tt"><b>'+esc(u.n)+bdg(S.lv,1)+'</b><span>ID '+u.id+(u.un?' · @'+esc(u.un):'')+'</span></div><div class="pill" id="bal">'+f(u.b)+'</div>'+(S.adm?'<div class="gr" data-a="tab" data-t="'+(tab=='a'?'h':'a')+'">'+(tab=='a'?CLOSE:GEAR)+'</div>':'')+'</header><div class="pg">'+({h:home,t:tasks,f:farm,r:refer,b:board,w:wallet,a:admin})[tab]()+'</div>';
 const IC={f:'<path d="M12 21v-9M12 12c-4 0-6-2-6-6 4 0 6 2 6 6zM12 14c0-4 2-6 6-6 0 4-2 6-6 6z"/>',h:'<path d="M13 2L4 14h7l-1 8 9-12h-7z"/>',t:'<circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/>',r:'<circle cx="10" cy="8" r="3.5"/><path d="M3.5 20v-1a4 4 0 014-4h5a4 4 0 014 4v1"/>',b:'<path d="M5 20V10M12 20V4M19 20v-7"/>',w:'<rect x="3" y="6" width="18" height="13" rx="3"/><path d="M16 13h2"/>',a:'<circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/>'};
-const tb=[['h','Mine'],['t','Tasks'],['f','Farm'],['r','Refer'],['b','Board'],['w','Wallet']];if(S.adm)tb.push(['a','Admin']);
+const tb=[['h','Home'],['t','Tasks'],['f','Farm'],['r','Refer'],['b','Ranking'],['w','Wallet']];
 $('nav').innerHTML=tb.map(t=>'<a data-a="tab" data-t="'+t[0]+'" class="'+(tab==t[0]?'on':'')+'"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">'+IC[t[0]]+'</svg>'+t[1]+'</a>').join('');
 const bl=$('bal');if(bl){if(pb!==null&&pb!=u.b){const a0=+pb,t0=performance.now(),to=+u.b,st=t=>{const k=Math.min(1,(t-t0)/600);bl.textContent=f(a0+(to-a0)*k);if(k<1)requestAnimationFrame(st)};requestAnimationFrame(st)}pb=u.b}ld()}
 document.onclick=e=>{const b=e.target.closest('[data-a]');if(!b)return;try{T.HapticFeedback.impactOccurred('light')}catch(e){}const d=Object.assign({},b.dataset),a=d.a,F=b.closest('[data-f]');
@@ -740,11 +796,16 @@ if(a=='aa'&&F)d.rl=[].slice.call(F.querySelectorAll('input[type=checkbox]:checke
 if(a=='tab'){tab=d.t;render();const p=$('app');p.classList.remove('fi');void p.offsetWidth;p.classList.add('fi')}
 else if(a=='v'){const l=d.url;if(l.indexOf('t.me/')>-1)T.openTelegramLink(l);else T.openLink(l);act('ts',{t:d.t})}
 else if(a=='sv'){try{T.shareToStory(S.c.sm,{text:'Mine Spider Coin with me!',widget_link:{url:'https://t.me/'+S.bot+'?start=r'+S.u.id,name:'Spider Coin'}})}catch(e){}act('ss')}
+else if(a=='lg'||a=='lc'||a=='lt'){(a=='lt'?api('lt').then(function(){return api('lg')}):api(a)).then(function(r){if(r&&r.lg){LG=r.lg;render()}})}
 else if(a=='cp'){try{navigator.clipboard.writeText(d.l).then(()=>toast('Copied ✓'),()=>cpf(d.l))}catch(e){cpf(d.l)}}
 else if(a=='sh')T.openTelegramLink('https://t.me/share/url?url='+encodeURIComponent(d.l)+'&text='+encodeURIComponent('Mine Spider Coin with me!'));
 else if(a=='ol')T.openTelegramLink(d.l);else if(a=='ws'){wsub=d.s;render()}else if(a=='fs'){fsub=d.s;render()}else if(a=='inv'){const url=location.origin+'/invoice?i='+encodeURIComponent(T.initData)+'&n='+encodeURIComponent(d.no);try{if(T.downloadFile&&T.isVersionAtLeast&&T.isVersionAtLeast('8.0'))T.downloadFile({url:url,file_name:d.no+'.pdf'});else T.openLink(url)}catch(e){T.openLink(url)}}else if(a=='sp'){const go=()=>act('sp',d);if(T.showConfirm)T.showConfirm('Post this entry? A profit entry pays coins to all stock holders immediately and cannot be undone.',ok=>{if(ok)go()});else go()}else act(a,d)};
 setInterval(()=>{const m=$('mn');if(m&&S){const u=S.u,v=u.mst?Math.min(Date.now()+off-u.mst,864e5)*S.er/864e5:0;m.textContent=v.toFixed(6);const b=$('cb');if(b)b.disabled=v<+S.c.minc;const p=Math.min(1,v/+S.c.minc),g=$('rg');if(g)g.style.strokeDashoffset=553*(1-p);const pc=$('pc');if(pc)pc.textContent=u.mst?Math.floor(p*100)+'% to claim':'SPC mined'}},100);
 setInterval(()=>{if(S&&tab=='t'&&(S.tk.some(k=>k.s&&!k.dc&&Date.now()+off-k.s<S.c.secs*1e3+1e3)||S.u.ss&&Date.now()+off-S.u.ss<S.c.secs*1e3+1e3))render()},1000);
+let CE=0;
+function rep(m,l,c,st){if(CE>=5||!T.initData)return;CE++;try{fetch('/api',{method:'POST',body:JSON.stringify({i:T.initData,a:'ce',m:String(m||'').slice(0,300),l:l|0,c:c|0,st:String(st||'').slice(0,700),t:tab})}).catch(function(){})}catch(e){}}
+window.addEventListener('error',function(e){if(e.filename&&e.filename.indexOf(location.origin)!==0)return;rep(e.message,e.lineno,e.colno,e.error&&e.error.stack)});
+window.addEventListener('unhandledrejection',function(e){const r=e.reason;rep(r&&r.message||String(r),0,0,r&&r.stack)});
 act('me');
 </script></body></html>`;
 
