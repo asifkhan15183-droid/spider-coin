@@ -1,13 +1,14 @@
 // =====================================================================
-// SPIDER COIN (SPC) - Telegram Mini ApP
+// SPIDER COIN (SPC) - Telegram Mini App
 // Single-file Cloudflare Worker (frontend + backend) + D1 database
 // Bindings: D1 "DB" | Secrets: BOT_TOKEN, WEBHOOK_SECRET | Optional var: ADMIN_ID
 // Version 1.1: Error Logs, Admin button at the top, tab names (Home, Ranking)
 // Version 1.2: SPC to USDT rate (admin), USDT shown beside SPC, rate saved in history, community supply cap
 // Version 1.2.1: header balance pill removed, rate card replaced by one line, bigger USDT line on the card
+// Version 1.3: server-enforced 30s task timer, custom task button labels, Official Channel check for send and withdraw
 // =====================================================================
 const MAIN_ADMIN = "8825348718", ADMIN_USER = "Spider_Incom", BOT_USER = "SPC_Wallet_bot";
-const FOREVER = 4102444800000, SV = "8", APP_VERSION = "1.2.1";
+const FOREVER = 4102444800000, SV = "9", APP_VERSION = "1.3";
 // Supply: 10 billion SPC in total. The community (all user balances) may hold at most 50%.
 const TOTAL_SUPPLY = 1e10, CAP_PCT = 50, COMMUNITY_CAP = TOTAL_SUPPLY * CAP_PCT / 100;
 const CAPMSG = "The reward limit for the community supply is reached. Please try again later.";
@@ -81,6 +82,7 @@ async function init(db) {
     await addCols("u", [["un", "TEXT DEFAULT ''"], ["vl", "INTEGER DEFAULT 0"], ["vx", "INTEGER DEFAULT 0"], ["fm", "TEXT DEFAULT ''"], ["sl", "INTEGER DEFAULT 0"], ["ss", "INTEGER DEFAULT 0"], ["rc", "INTEGER DEFAULT 0"], ["bn", "INTEGER DEFAULT 0"], ["ts", "INTEGER DEFAULT 0"], ["rg", "INTEGER DEFAULT 0"]]);
     await addCols("w", [["ts", "INTEGER DEFAULT 0"]]);
     await addCols("h", [["rt", "TEXT DEFAULT ''"]]);
+    await addCols("t", [["bl", "TEXT DEFAULT ''"]]);
     await addCols("admins", [["rl", "TEXT DEFAULT 'cfg,tk,us,wd,od,st'"]]);
     await db.batch([
       db.prepare("CREATE INDEX IF NOT EXISTS hu ON h(u,id)"),
@@ -129,6 +131,16 @@ async function getC(db, fresh) {
   CC = { t: n, d: c }; return c;
 }
 const chs = s => String(s || "").split(",").map(x => x.trim()).filter(Boolean);
+// Returns "" when the user is in every Official Channel, otherwise the message to show.
+async function chanCheck(env, id, c) {
+  for (const x of chs(c.ch)) {
+    const r = await tg(env, "getChatMember", { chat_id: x, user_id: id });
+    if (!r || !r.ok) return "Cannot check the Official Channel right now. Please try again later.";
+    const st = r.result.status;
+    if (st == "left" || st == "kicked" || (st == "restricted" && !r.result.is_member)) return "Join the Official Channel first. It is required to send and withdraw SPC.";
+  }
+  return "";
+}
 
 // ---------------------------------------------------------------- router
 export default {
@@ -180,6 +192,7 @@ async function run(rq, env) {
     E = e => J({ e }),
     HS = (w, k, m, n, g, gb) => P("INSERT INTO h(u,k,amt,ts,n,rt) SELECT ?,?,?,?,?,? WHERE " + g, w, k, m, now, n || "", String(c.urt), ...gb);
   const c = await getC(db, a == "wd" || ADM.has(a)), N = k => +c[k];
+  c.secs = Math.max(30, +c.secs || 30);
   const SEL = "SELECT u.*,COALESCE((SELECT st FROM mining WHERE u=u.id),0) mst,EXISTS(SELECT 1 FROM admins WHERE id=u.id) isa,(SELECT rl FROM admins WHERE id=u.id) arl FROM u WHERE u.id=?";
   const un = (us.username || "").toLowerCase(), nm = String(us.first_name || "User").slice(0, 64);
   const sp = IP.get("start_param") || "";
@@ -199,6 +212,7 @@ async function run(rq, env) {
     if (m && !/^Script error/i.test(m)) await logErr(db, "client", "ui:" + t, id, m, "@" + l + ":" + cl + "\n" + String(q.st || "").slice(0, 700));
     return J({ ok: 1 });
   }
+  if (a == "cm") { const has = chs(c.ch).length > 0; return J({ m: has ? !(await chanCheck(env, id, c)) : null }) }
   if (a == "lg" || a == "lc" || a == "lt") {
     if (!adm || !can("lg")) return E("You do not have permission for this action");
     if (a == "lt") throw new Error("Test error created by the admin button");
@@ -268,12 +282,12 @@ async function run(rq, env) {
         const n = await Q("SELECT COUNT(*) n FROM t WHERE o=0 AND st='a'"); if (n.n >= 10) return E("Max 10 daily tasks");
         const url = String(q.url || "").trim(), rw = q.rw === "" || q.rw === undefined ? N("dtr") : +q.rw;
         if (!/^https:[/][/]\S{3,480}$/.test(url) || !(rw > 0)) return E("Valid https link and reward needed");
-        await X("INSERT INTO t(url,rw) VALUES(?,?)", url, rw); break;
+        await X("INSERT INTO t(url,rw,bl) VALUES(?,?,?)", url, rw, String(q.bl || "").trim().slice(0, 24)); break;
       }
       case "ae": {
         const url = String(q.url || "").trim(), rw = +q.rw;
         if (!/^https:[/][/]\S{3,480}$/.test(url) || !(rw > 0)) return E("Valid https link and reward needed");
-        await X("UPDATE t SET url=?,rw=? WHERE id=? AND o=0 AND st='a'", url, rw, tid); break;
+        await X("UPDATE t SET url=?,rw=?,bl=? WHERE id=? AND o=0 AND st='a'", url, rw, String(q.bl || "").trim().slice(0, 24), tid); break;
       }
       case "ad": await X("UPDATE t SET st='x' WHERE id=?", tid); break;
       case "ap": await X("UPDATE t SET st=? WHERE id=? AND st='p'", OK ? "a" : "x", tid); break;
@@ -433,6 +447,7 @@ async function run(rq, env) {
     }
     case "wd": {
       if (String(c.wd) != "1") return E("Withdrawal Start in 2027");
+      { const cm = await chanCheck(env, id, c); if (cm) return E(cm) }
       const m = Math.round(+q.amt * 1e6) / 1e6, ad = String(q.ad || "").trim();
       if (!(m >= N("minw"))) return E("Minimum withdraw " + c.minw);
       if (!/^0x[a-fA-F0-9]{40}$/.test(ad)) return E("Enter a valid BEP20 address (0x...)");
@@ -443,6 +458,7 @@ async function run(rq, env) {
     case "sd": {
       const m = Math.round(+q.amt * 1e6) / 1e6, to = String(q.to || "").replace(/^@/, "").trim().toLowerCase();
       if (!(m > 0 && m >= N("mins"))) return E("Minimum send " + c.mins);
+      { const cm = await chanCheck(env, id, c); if (cm) return E(cm) }
       const byId = /^[0-9]{5,15}$/.test(to);
       if (!byId && !/^[a-z0-9_]{4,32}$/.test(to)) return E("Enter a valid @username or Telegram ID");
       const v = byId ? await Q("SELECT id,un FROM u WHERE id=? AND rg=1", +to) : await Q("SELECT id,un FROM u WHERE un=?", to);
@@ -533,7 +549,7 @@ async function run(rq, env) {
     default: return E("Unknown action");
   }
   const r = await db.batch([P(SEL, id),
-    P("SELECT t.id,t.url,t.rw,t.o,t.q,d.s,d.c dc FROM t LEFT JOIN d ON d.u=? AND d.t=t.id AND d.y=IIF(t.q=1,'0',?) WHERE t.st='a' AND t.o!=? AND NOT (t.o>0 AND d.c=1) ORDER BY t.o,t.id LIMIT 40", id, today, id),
+    P("SELECT t.id,t.url,t.rw,t.o,t.q,t.bl,d.s,d.c dc FROM t LEFT JOIN d ON d.u=? AND d.t=t.id AND d.y=IIF(t.q=1,'0',?) WHERE t.st='a' AND t.o!=? AND NOT (t.o>0 AND d.c=1) ORDER BY t.o,t.id LIMIT 40", id, today, id),
     P("SELECT COUNT(*) n FROM refs WHERE referrer=?", id),
     P("SELECT n,fr FROM stk WHERE u=?", id),
     P("SELECT COUNT(*) n,COALESCE(SUM(y=?),0) t FROM wb WHERE u=?", today, id)]);
@@ -731,8 +747,8 @@ return homebal()+'<div class="c mine"><span class="st'+(m?' on':'')+'">'+(m?'<i 
 function story(){if(!S.c.sm)return '';const u=S.u,n=Date.now()+off,wt=u.sl&&n-u.sl<6048e5,rem=u.ss?Math.ceil(S.c.secs-(n-u.ss)/1e3):0;
 return '<div class="c"><b>Telegram story</b><p class="m">Post a story and earn '+S.c.srw+' SPC, once every 7 days.</p>'+(wt?'<button class="b" disabled>Next in '+Math.ceil((6048e5-(n-u.sl))/864e5)+'d</button>':!u.ss?'<button class="b" data-a="sv">Post story</button>':rem>0?'<button class="b" disabled>⏳ '+rem+'s</button>':'<button class="b" data-a="sc">Claim '+S.c.srw+'</button>')+'</div>'}
 function tl(){const R=k=>{const rem=k.s?Math.ceil(S.c.secs-(Date.now()+off-k.s)/1e3):0;
-const b=k.dc?'<button class="b" disabled>Done ✓</button>':!k.s?'<button class="b" data-a="v" data-t="'+k.id+'" data-url="'+esc(k.url)+'">Visit</button>':rem>0?'<button class="b" disabled>⏳ '+rem+'s</button>':'<button class="b" data-a="tc" data-t="'+k.id+'">Claim</button>';
-return '<div class="c"><span class="m">'+(k.o?'Promoted':'Daily')+'</span><div style="margin:4px 0;word-break:break-all">'+esc(host(k.url))+'</div><b style="color:var(--a)">+'+f(k.rw)+' 🕷</b><br>'+b+'</div>'};
+const b=k.dc?'<button class="b" disabled>Done ✓</button>':!k.s?'<button class="b" data-a="v" data-t="'+k.id+'" data-url="'+esc(k.url)+'">'+esc(k.bl||'Visit Link')+'</button>':rem>0?'<button class="b" disabled>⏳ '+rem+'s</button>':'<button class="b" data-a="tc" data-t="'+k.id+'">Claim</button>';
+return '<div class="c"><span class="m">'+(k.o?'Promoted':'Daily')+'</span>'+(k.bl?'':'<div style="margin:4px 0;word-break:break-all">'+esc(host(k.url))+'</div>')+'<b style="color:var(--a)">+'+f(k.rw)+' 🕷</b><br>'+b+'</div>'};
 return S.tk.length?'<div class="g">'+S.tk.map(R).join('')+'</div>':'<div class="c m">No tasks yet. Come back soon.</div>'}
 function promo(){const P=[[1,5000,1,500,'visits'],[2,10000,2,1000,'visits'],[3,20000,4,1000,'unique visits']];
 return '<div class="c" data-f><b>🚀 Promote a link</b><p class="m">TikTok, Telegram or any https site. Members earn '+S.c.prw+' 🕷 per visit.</p><input name="url" placeholder="https://..."><select name="p">'+P.map(p=>'<option value="'+p[0]+'">'+p[3]+' '+p[4]+' · '+p[1]+' coins / '+p[2]+' USDT</option>').join('')+'</select><select name="pay"><option value="c">Pay with coins'+(S.lv?' (-'+S.c.disc+'%)':'')+'</option>'+(S.lv>1?'<option value="f">Free monthly (1k visits)</option>':'')+'<option value="u">Pay with USDT (BEP20)</option></select><input name="tx" placeholder="USDT TX hash (USDT only)"><p class="m">USDT address:</p>'+dep(S.c.dep)+'<p class="m">USDT orders are reviewed manually by an admin.</p><button class="b" data-a="pr">Submit</button></div>'}
@@ -753,12 +769,17 @@ function homebal(){const u=S.u;return '<div class="c"><div class="r" style="padd
 function ratesupply(){const s=AD.sup||{total:1e10,cap:5e9,held:0},p=s.cap?s.held/s.cap*100:0;
 return '<div class="c" data-f><b>SPC to USDT rate</b><p class="m">Price of 1 SPC in USDT, up to 10 decimals. Now: 1 SPC = '+esc(AD.c.urt)+' USDT</p><input name="urt" inputmode="decimal" value="'+esc(AD.c.urt)+'"><button class="b" data-a="ar">Save rate</button><div class="m" style="margin-top:6px">Old history keeps the rate it was made with.</div></div>'
 +'<div class="c"><b>Supply</b><div class="stat3"><div><span>Total supply</span><b>'+fk(s.total)+'</b></div><div><span>Community cap</span><b>'+fk(s.cap)+'</b></div><div><span>Held now</span><b>'+fk(Math.round(s.held))+'</b></div></div><div class="m">Used '+p.toFixed(2)+'% \u00b7 Room left '+fk(Math.max(0,Math.round(s.cap-s.held)))+' SPC</div>'+(p>=90?'<div class="m" style="color:var(--rd)">Warning: over 90% of the community cap is used.</div>':p>=80?'<div class="m" style="color:var(--gd)">Notice: over 80% of the community cap is used.</div>':'')+'</div>'}
+let CM=null,CMT=0;
+function joinnote(){const hs=String(S.c.ch||'').split(',').map(h=>h.trim()).filter(Boolean);if(!hs.length)return '';
+if(Date.now()-CMT>6e4){CMT=Date.now();api('cm').then(function(r){if(r){CM=r.m;render()}})}
+if(CM===true)return '';
+return '<div class="c" style="border-color:var(--gd)"><b>Official Channel is required</b><p class="m">You must join the Official Channel to send, receive and withdraw SPC.</p>'+hs.map(h=>'<button class="b" data-a="ol" data-l="https://t.me/'+esc(h.replace('@',''))+'">Join '+esc(h)+'</button>').join('')+'<p class="m">After joining, open this page again.</p></div>'}
 function wallet(){const u=S.u,v=S.lv,K={mc:'Mining',task:'Task',referral:'Referral',sent:'Sent',received:'Received',promo:'Promo',vip:'VIP',withdraw:'Withdraw',refund:'Refund',story:'Story',admin:'Admin',stock:'Stock',farm:'Farm profit',bonus:'Welcome bonus'};
 let x=card()+rateline()+'<div class="sg">'+[['s','Send'],['w','Withdraw'],['v','VIP'],['h','History']].map(t=>'<a data-a="ws" data-s="'+t[0]+'" class="'+(wsub==t[0]?'on':'')+'">'+t[1]+'</a>').join('')+'</div>';
-if(wsub=='s'){
+if(wsub=='s'){x+=joinnote();
 x+='<div class="c"><b>Your ID</b><div class="r"><span style="font-family:ui-monospace,monospace;font-size:18px;color:var(--a)">'+u.id+(u.un?'<br><span class="m">@'+esc(u.un)+'</span>':'')+'</span><button class="b" data-a="cp" data-l="'+u.id+'">Copy ID</button></div><p class="m">Share your ID so others can send you SPC.</p></div>';
 x+='<div class="c" data-f><b>Send SPC</b><input name="to" placeholder="@username or Telegram ID" autocomplete="off"><input name="amt" type="number" step="any" placeholder="Amount (min '+S.c.mins+')"><button class="b" data-a="sd">Send</button><p class="m">The receiver must have opened the app once.</p></div>'}
-else if(wsub=='w'){
+else if(wsub=='w'){x+=joinnote();
 x+=S.c.wd=='1'?'<div class="c" data-f><b>Withdraw</b><p class="m">Requests are reviewed and paid manually by an admin.'+(v>1?' VVIP: priority review.':'')+'</p><input name="amt" type="number" step="any" placeholder="Min '+S.c.minw+'"><input name="ad" placeholder="'+esc(S.c.wl)+'"><button class="b" data-a="wd">Withdraw</button></div>':'<div class="c" style="text-align:center;padding:30px 14px"><div style="font-size:36px">🔒</div><b style="font-size:17px;color:var(--gd)">Withdrawal Start in 2027</b></div>'}
 else if(wsub=='v'){
 x+=tier(1,S.c.vc,S.c.vp1,['Mining '+S.c.vr+' SPC/day','-'+S.c.disc+'% on coin promos','Gold VIP badge','Permanent'],v)+tier(2,S.c.vc2,S.c.vp2,['Everything in VIP','1 free 1k-visit promo every month','Priority withdrawal review','Premium VVIP badge'],v);
@@ -814,7 +835,7 @@ const bt=(a,id,ok,t,x)=>'<button class="b'+(x?' x':'')+'" data-a="'+a+'" data-id
 const cks=sel=>RL.map(r=>'<label class="ck"><input type="checkbox" value="'+r[0]+'"'+(sel.indexOf(r[0])>-1?' checked':'')+'>'+r[1]+'</label>').join('');
 let x='<div class="c"><b>🛠 Admin</b> <span class="m">App v'+VER+' · Users: '+AD.n+' · '+(AD.im?'Main Admin':'Roles: '+AD.rl.join(', '))+'</span></div>';
 if(has('cfg'))x+='<div class="c" data-f><b>Settings</b>'+Object.keys(L).map(k=>'<span class="m">'+L[k]+'</span><input name="'+k+'" value="'+esc(AD.c[k])+'">').join('')+'<button class="b" data-a="as">Save</button></div>';
-if(has('tk')){x+='<div class="c"><b>Daily tasks (max 10)</b>'+AD.tk.filter(k=>!k.o&&k.st=='a').map(k=>'<div data-f style="border-bottom:1px solid var(--ln);padding:6px 0"><input name="url" value="'+esc(k.url)+'"><input name="rw" type="number" step="any" value="'+k.rw+'"><div class="g"><button class="b" data-a="ae" data-id="'+k.id+'">Save</button>'+bt('ad',k.id,'','Delete',1)+'</div></div>').join('')+'<div data-f><input name="url" placeholder="https://..."><input name="rw" type="number" step="any" placeholder="Reward (default '+esc(AD.c.dtr)+')"><button class="b" data-a="at">Add task</button></div></div>';
+if(has('tk')){x+='<div class="c"><b>Daily tasks (max 10)</b>'+AD.tk.filter(k=>!k.o&&k.st=='a').map(k=>'<div data-f style="border-bottom:1px solid var(--ln);padding:6px 0"><input name="url" value="'+esc(k.url)+'"><input name="bl" maxlength="24" placeholder="Button label (e.g. Visit Channel)" value="'+esc(k.bl||'')+'"><input name="rw" type="number" step="any" value="'+k.rw+'"><div class="g"><button class="b" data-a="ae" data-id="'+k.id+'">Save</button>'+bt('ad',k.id,'','Delete',1)+'</div></div>').join('')+'<div data-f><input name="url" placeholder="https://..."><input name="bl" maxlength="24" placeholder="Button label (e.g. Visit Channel)"><input name="rw" type="number" step="any" placeholder="Reward (default '+esc(AD.c.dtr)+')"><button class="b" data-a="at">Add task</button></div></div>';
 x+='<div class="c"><b>Promo orders</b>'+AD.tk.filter(k=>k.o).map(k=>'<div class="r"><span>'+esc(k.url)+'<br><span class="m">owner '+k.o+' · left '+k.l+(k.st=='p'?' · '+esc(k.x):'')+'</span></span>'+(k.st=='p'?bt('ap',k.id,'1','✓')+bt('ap',k.id,'','✕',1):bt('ad',k.id,'','✕',1))+'</div>').join('')+'</div>'}
 if(has('od'))x+='<div class="c"><b>VIP orders</b>'+AD.od.map(o=>'<div class="r"><span>'+o.u+' · '+o.k+'<br><span class="m">'+esc(o.tx)+'</span></span>'+bt('ao',o.id,'1','✓')+bt('ao',o.id,'','✕',1)+'</div>').join('')+'</div>';
 if(has('wd'))x+='<div class="c"><b>Withdraw requests</b>'+AD.w.map(w=>'<div class="r"><span>'+w.u+(w.lv>1?' VVIP':w.lv?' VIP':'')+' · '+f(w.amt)+'<br><span class="m">'+esc(w.ad)+'</span></span>'+bt('aw',w.id,'1','✓')+bt('aw',w.id,'','✕',1)+'</div>').join('')+'</div>';
