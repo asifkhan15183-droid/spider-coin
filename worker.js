@@ -6,18 +6,19 @@
 // Version 1.2: SPC to USDT rate (admin), USDT shown beside SPC, rate saved in history, community supply cap
 // Version 1.2.1: header balance pill removed, rate card replaced by one line, bigger USDT line on the card
 // Version 1.3: server-enforced 30s task timer, custom task button labels, Official Channel check for send and withdraw
+// Version 1.4: referral Pending/Successful, new startapp link, referral boost, 3-level commission (pool), Spider Web
 // =====================================================================
 const MAIN_ADMIN = "8825348718", ADMIN_USER = "Spider_Incom", BOT_USER = "SPC_Wallet_bot";
-const FOREVER = 4102444800000, SV = "9", APP_VERSION = "1.3";
+const FOREVER = 4102444800000, SV = "10", APP_VERSION = "1.4";
 // Supply: 10 billion SPC in total. The community (all user balances) may hold at most 50%.
 const TOTAL_SUPPLY = 1e10, CAP_PCT = 50, COMMUNITY_CAP = TOTAL_SUPPLY * CAP_PCT / 100;
 const CAPMSG = "The reward limit for the community supply is reached. Please try again later.";
 let SUP = { t: 0, v: 0 };
-const DEF = { rate: 10, minc: 5, refrw: 200, secs: 30, prw: 9.23, wd: 0, minw: 1000, ch: "", dep: "", wl: "USDT BEP20 address", vp1: 2, vp2: 10, vc: 1e5, vc2: 5e5, vr: 20, disc: 5, mins: 1000, srw: 100, sm: "", dtr: 15, spc: 25000, spu: 2, stt: 2000000, wbr: 100, wbf: 0, str: "", urt: "0.0001" };
+const DEF = { rate: 10, minc: 5, refrw: 200, secs: 30, prw: 9.23, wd: 0, minw: 1000, ch: "", dep: "", wl: "USDT BEP20 address", vp1: 2, vp2: 10, vc: 1e5, vc2: 5e5, vr: 20, disc: 5, mins: 1000, srw: 100, sm: "", dtr: 15, spc: 25000, spu: 2, stt: 2000000, wbr: 100, wbf: 0, str: "", urt: "0.0001", cp1: 10, cp2: 5, cp3: 2.5 };
 const NK = ["rate", "minc", "refrw", "secs", "prw", "minw", "vp1", "vp2", "vc", "vc2", "vr", "disc", "mins", "srw", "dtr", "spc", "spu", "stt", "wbr", "wbf"];
 const PL = { 1: { c: 5e3, v: 500, q: 0 }, 2: { c: 1e4, v: 1000, q: 0 }, 3: { c: 2e4, v: 1000, q: 1 } };
-const ADM = new Set(["al", "as", "at", "ae", "ad", "ap", "aw", "ao", "aa", "au", "ab", "ag", "ar", "sp", "sq", "so", "sx"]);
-const ROLE = { as: "cfg", at: "tk", ae: "tk", ad: "tk", ap: "tk", aw: "wd", ao: "od", au: "us", ab: "us", ag: "us", ar: "rt", sp: "st", sq: "st", so: "st", sx: "main", aa: "main" };
+const ADM = new Set(["al", "as", "at", "ae", "ad", "ap", "aw", "ao", "aa", "au", "ab", "ag", "ar", "ac", "cf", "sp", "sq", "so", "sx"]);
+const ROLE = { as: "cfg", at: "tk", ae: "tk", ad: "tk", ap: "tk", aw: "wd", ao: "od", au: "us", ab: "us", ag: "us", ar: "rt", ac: "cm", cf: "cm", sp: "st", sq: "st", so: "st", sx: "main", aa: "main" };
 const J = (d, s = 200) => new Response(JSON.stringify(d), { status: s, headers: { "content-type": "application/json", "cache-control": "no-store" } });
 const tg = async (env, m, b) => { try { const r = await fetch("https://api.telegram.org/bot" + env.BOT_TOKEN + "/" + m, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(b) }); const j = await r.json(); if (j && j.ok === false && j.error_code !== 403) await logErr(env.DB, "bot", m, b && b.chat_id, "Telegram " + m + " failed: " + (j.description || j.error_code), "chat_id " + (b && b.chat_id)); return j } catch (e) { await logErr(env.DB, "bot", m, b && b.chat_id, e); return { ok: false } } };
 
@@ -36,6 +37,50 @@ async function logErr(db, src, act, uid, err, extra) {
   } catch (e) { }
 }
 let READY = false, CC = { t: 0, d: null }, LB = { t: 0, d: null }, MK = { t: 0, d: null };
+
+// ---------------------------------------------------------------- referral: Pending -> Successful
+// Successful only when the invited user joined the Official Channel (checked now) AND started mining or finished a task.
+async function refCheck(db, env, c, id) {
+  try {
+    const rf = await db.prepare("SELECT referrer FROM refs WHERE referred=? AND st='p'").bind(id).first(); if (!rf) return;
+    const me = await db.prepare("SELECT c FROM u WHERE id=?").bind(id).first(); if (!me || me.c != 1) return;
+    const a = await db.prepare("SELECT COALESCE((SELECT st FROM mining WHERE u=?),0) ms,(SELECT COUNT(*) FROM h WHERE u=? AND k='mc') m,(SELECT COUNT(*) FROM d WHERE u=? AND c=1) t").bind(id, id, id).first();
+    if (!(a && (a.ms > 0 || a.m > 0 || a.t > 0))) return;
+    if (chs(c.ch).length && await chanCheck(env, id, c)) return;
+    const rw = Number(c.refrw) || 0, g = "EXISTS(SELECT 1 FROM refs WHERE referred=? AND st='p')";
+    await db.batch([
+      db.prepare("UPDATE u SET p=ROUND(p+?,6),rc=rc+1 WHERE id=? AND " + g).bind(rw, rf.referrer, id),
+      db.prepare("UPDATE refs SET st='s',rw=?,ts=? WHERE referred=? AND st='p'").bind(rw, Date.now(), id)]);
+  } catch (e) { await logErr(db, "server", "refcheck", id, e) }
+}
+
+// ---------------------------------------------------------------- 3-level lifetime commission (paid in SPC from the admin pool)
+async function payCommission(db, c, buyer, ref, kd, base, unit) {
+  try {
+    const pcts = [Number(c.cp1), Number(c.cp2), Number(c.cp3)], rate = Number(c.urt);
+    let cur = buyer;
+    for (let lvl = 1; lvl <= 3; lvl++) {
+      const r = await db.prepare("SELECT referrer FROM refs WHERE referred=? AND st='s'").bind(cur).first();
+      if (!r) break; cur = r.referrer;
+      const bp = Math.round((pcts[lvl - 1] || 0) * 100); if (!(bp > 0)) continue;
+      const bm = Math.round(base * 1e6);
+      const amt = unit == "usdt" ? (rate > 0 ? Math.round(bm * bp / 10000 / rate) / 1e6 : 0) : Math.round(bm * bp / 10000) / 1e6;
+      if (!(amt > 0)) continue;
+      const now = Date.now(), row = [ref, lvl, cur, buyer, kd, bp, base, unit, amt, now];
+      if (await capOk(db, amt)) {
+        const g = "NOT EXISTS(SELECT 1 FROM cm WHERE ref=? AND lvl=?) AND (SELECT b FROM cp WHERE id=1)>=?";
+        const own = "EXISTS(SELECT 1 FROM cm WHERE ref=? AND lvl=? AND st='p' AND ts=?)";
+        await db.batch([
+          db.prepare("INSERT INTO cm(ref,lvl,u,src,kd,bp,base,ut,amt,st,ts) SELECT ?,?,?,?,?,?,?,?,?,'p',? WHERE " + g).bind(...row, ref, lvl, amt),
+          db.prepare("INSERT INTO h(u,k,amt,ts,n,rt) SELECT ?,'commission',?,?,?,? WHERE " + own).bind(cur, amt, now, "Level " + lvl, String(c.urt), ref, lvl, now),
+          db.prepare("UPDATE u SET b=ROUND(b+?,6) WHERE id=? AND " + own).bind(amt, cur, ref, lvl, now),
+          db.prepare("UPDATE cp SET b=ROUND(b-?,6) WHERE id=1 AND " + own).bind(amt, ref, lvl, now)]);
+      }
+      // not paid (pool empty or supply cap): keep a record so the admin can see it
+      await db.prepare("INSERT OR IGNORE INTO cm(ref,lvl,u,src,kd,bp,base,ut,amt,st,ts) VALUES(?,?,?,?,?,?,?,?,?,'u',?)").bind(...row).run();
+    }
+  } catch (e) { await logErr(db, "server", "commission", buyer, e) }
+}
 
 // ---------------------------------------------------------------- community supply cap
 async function heldSum(db, fresh) {
@@ -74,6 +119,11 @@ async function init(db) {
       db.prepare("CREATE TABLE IF NOT EXISTS stl(id INTEGER PRIMARY KEY AUTOINCREMENT,u INTEGER,k TEXT,q INTEGER,n TEXT,ts INTEGER)"),
       db.prepare("CREATE TABLE IF NOT EXISTS pl(id INTEGER PRIMARY KEY AUTOINCREMENT,no TEXT UNIQUE,k TEXT,pps REAL,nt TEXT,hold INTEGER,tot REAL,ts INTEGER,aid INTEGER)"),
       db.prepare("CREATE TABLE IF NOT EXISTS wb(u INTEGER,y TEXT,PRIMARY KEY(u,y))"),
+      db.prepare("CREATE TABLE IF NOT EXISTS cm(id INTEGER PRIMARY KEY AUTOINCREMENT,ref TEXT,lvl INTEGER,u INTEGER,src INTEGER,kd TEXT,bp INTEGER,base REAL,ut TEXT,amt REAL,st TEXT,ts INTEGER)"),
+      db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS cmu ON cm(ref,lvl)"),
+      db.prepare("CREATE INDEX IF NOT EXISTS cmr ON cm(u,id)"),
+      db.prepare("CREATE TABLE IF NOT EXISTS cp(id INTEGER PRIMARY KEY,b REAL DEFAULT 0)"),
+      db.prepare("INSERT OR IGNORE INTO cp(id,b) VALUES(1,0)"),
       db.prepare("CREATE TABLE IF NOT EXISTS el(id INTEGER PRIMARY KEY AUTOINCREMENT,sig TEXT UNIQUE,src TEXT,act TEXT,u INTEGER DEFAULT 0,msg TEXT,stk TEXT,n INTEGER DEFAULT 1,ts INTEGER,ls INTEGER)")]);
     const addCols = async (tbl, list) => {
       const cols = ((await db.prepare("PRAGMA table_info(" + tbl + ")").all()).results || []).map(r => r.name);
@@ -83,6 +133,8 @@ async function init(db) {
     await addCols("w", [["ts", "INTEGER DEFAULT 0"]]);
     await addCols("h", [["rt", "TEXT DEFAULT ''"]]);
     await addCols("t", [["bl", "TEXT DEFAULT ''"]]);
+    await addCols("refs", [["st", "TEXT DEFAULT 's'"]]);
+    await db.prepare("INSERT OR IGNORE INTO refs(referred,referrer,rw,ts,st) SELECT id,r,0,0,'p' FROM u WHERE r>0 AND c=0").run();
     await addCols("admins", [["rl", "TEXT DEFAULT 'cfg,tk,us,wd,od,st'"]]);
     await db.batch([
       db.prepare("CREATE INDEX IF NOT EXISTS hu ON h(u,id)"),
@@ -198,8 +250,8 @@ async function run(rq, env) {
   const sp = IP.get("start_param") || "";
   const rr = async () => { const r = /^r[0-9]{1,15}$/.test(sp) ? +sp.slice(1) : 0; return r && r != id && await Q("SELECT id FROM u WHERE id=?", r) ? r : 0 };
   let u = await Q(SEL, id);
-  if (!u) { await X("INSERT OR IGNORE INTO u(id,n,r,ts,rg) VALUES(?,?,?,?,1)", id, nm, await rr(), now); u = await Q(SEL, id) }
-  else if (!u.rg && !u.r) { const r0 = await rr(); if (r0) { await X("UPDATE u SET r=? WHERE id=?", r0, id); u.r = r0 } }
+  if (!u) { await X("INSERT OR IGNORE INTO u(id,n,r,ts,rg) VALUES(?,?,?,?,1)", id, nm, await rr(), now); u = await Q(SEL, id); if (u && u.r) await X("INSERT OR IGNORE INTO refs(referred,referrer,rw,ts,st) VALUES(?,?,0,?,'p')", id, u.r, now) }
+  else if (!u.rg && !u.r) { const r0 = await rr(); if (r0) { await X("UPDATE u SET r=? WHERE id=?", r0, id); u.r = r0; await X("INSERT OR IGNORE INTO refs(referred,referrer,rw,ts,st) VALUES(?,?,0,?,'p')", id, r0, now) } }
   if ((u.un || "") !== un || u.n !== nm || !u.rg) {
     const st = []; if (un) st.push(P("UPDATE u SET un='' WHERE un=? AND id!=?", un, id));
     st.push(P("UPDATE u SET un=?,n=?,rg=1 WHERE id=?", un, nm, id)); await db.batch(st); u.un = un; u.n = nm; u.rg = 1;
@@ -212,6 +264,13 @@ async function run(rq, env) {
     if (m && !/^Script error/i.test(m)) await logErr(db, "client", "ui:" + t, id, m, "@" + l + ":" + cl + "\n" + String(q.st || "").slice(0, 700));
     return J({ ok: 1 });
   }
+  if (a == "rl") {
+    return J({
+      l: (await P("SELECT r.referred id,u.n,u.un,r.st,r.ts FROM refs r JOIN u ON u.id=r.referred WHERE r.referrer=? ORDER BY r.ts DESC LIMIT 100", id).all()).results,
+      cs: (await P("SELECT lvl,COUNT(*) n,COALESCE(SUM(amt),0) a FROM cm WHERE u=? AND st='p' GROUP BY lvl", id).all()).results,
+      ch: (await P("SELECT lvl,kd,amt,ts FROM cm WHERE u=? AND st='p' ORDER BY id DESC LIMIT 30", id).all()).results
+    });
+  }
   if (a == "cm") { const has = chs(c.ch).length > 0; return J({ m: has ? !(await chanCheck(env, id, c)) : null }) }
   if (a == "lg" || a == "lc" || a == "lt") {
     if (!adm || !can("lg")) return E("You do not have permission for this action");
@@ -219,7 +278,7 @@ async function run(rq, env) {
     if (a == "lc") { await X("DELETE FROM el"); return J({ lg: [] }) }
     return J({ lg: (await P("SELECT id,src,act,u,msg,stk,n,ts,ls FROM el ORDER BY ls DESC LIMIT 60").all()).results });
   }
-  const lv = u.vx > now ? u.vl : 0, er = lv ? N("vr") : N("rate");
+  const lv = u.vx > now ? u.vl : 0, er = (lv ? N("vr") : N("rate")) * (1 + Math.min(100, 5 * (+u.rc || 0)) / 100);
 
   if (a == "hi") return J({ h: (await P("SELECT k,amt,ts,n,rt FROM h WHERE u=? ORDER BY id DESC LIMIT 50", id).all()).results });
   if (a == "lb") {
@@ -258,6 +317,15 @@ async function run(rq, env) {
     let usr = null, ex = null;
     switch (a) {
       case "al": break;
+      case "ac": {
+        const o = {};
+        for (const k of ["cp1", "cp2", "cp3"]) { const v = String(q[k] === undefined ? "" : q[k]).trim(); if (!/^[0-9]{1,2}([.][0-9]{1,2})?$/.test(v) || Number(v) > 50) return E("Each percent must be 0 to 50 with up to 2 decimals"); o[k] = String(Number(v)) }
+        for (const k in o) await X("INSERT OR REPLACE INTO s(k,v) VALUES(?,?)", k, o[k]); CC.d = null; break;
+      }
+      case "cf": {
+        const m = Math.round(+q.amt * 1e6) / 1e6; if (!isFinite(m) || m === 0 || Math.abs(m) > 1e10) return E("Enter an amount (use - to take out of the pool)");
+        const r = await X("UPDATE cp SET b=ROUND(b+?,6) WHERE id=1 AND b+?>=0", m, m); if (r.meta.changes != 1) return E("The pool cannot go below 0"); break;
+      }
       case "ar": {
         const v0 = String(q.urt === undefined ? "" : q.urt).trim();
         if (!/^[0-9]{1,6}([.][0-9]{1,10})?$/.test(v0) || !(Number(v0) > 0)) return E("Enter a rate above 0 with up to 10 decimals, for example 0.0001");
@@ -308,7 +376,8 @@ async function run(rq, env) {
         else if (o.k == "rm") await X("UPDATE o SET st='x' WHERE id=? AND st='p'", o.id);
         else {
           const g = "EXISTS(SELECT 1 FROM o WHERE id=? AND st='p')";
-          await db.batch([P("UPDATE u SET vl=MAX(CASE WHEN vx>? THEN vl ELSE 0 END,?),vx=? WHERE id=? AND " + g, now, o.k == "v2" ? 2 : 1, FOREVER, o.u, o.id), P("UPDATE o SET st='a' WHERE id=? AND st='p'", o.id)]);
+          const rv = await db.batch([P("UPDATE u SET vl=MAX(CASE WHEN vx>? THEN vl ELSE 0 END,?),vx=? WHERE id=? AND " + g, now, o.k == "v2" ? 2 : 1, FOREVER, o.u, o.id), P("UPDATE o SET st='a' WHERE id=? AND st='p'", o.id)]);
+          if (rv[1].meta.changes == 1) await payCommission(db, c, o.u, "o:" + o.id, "vip", N(o.k == "v2" ? "vp2" : "vp1"), "usdt");
         }
         break;
       }
@@ -316,7 +385,7 @@ async function run(rq, env) {
         if (!(tid > 0)) return E("Enter a numeric Telegram ID");
         if (String(tid) == MAIN) return E("Main admin cannot be changed");
         if (ON) {
-          const rl = [...new Set(String(q.rl || "").split(",").map(x => x.trim()).filter(x => ["cfg", "tk", "us", "wd", "od", "st", "lg", "rt"].includes(x)))];
+          const rl = [...new Set(String(q.rl || "").split(",").map(x => x.trim()).filter(x => ["cfg", "tk", "us", "wd", "od", "st", "lg", "rt", "cm"].includes(x)))];
           if (!rl.length) return E("Choose at least one role");
           await X("INSERT INTO admins(id,by,ts,rl) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET rl=excluded.rl", tid, id, now, rl.join(","));
         } else await X("DELETE FROM admins WHERE id=?", tid);
@@ -341,6 +410,7 @@ async function run(rq, env) {
           const r = await db.batch([P("INSERT OR IGNORE INTO stk(u,n) SELECT ?,0 WHERE " + g, o.u, no), P("UPDATE stk SET n=n+? WHERE u=? AND " + g, o.q, o.u, no),
             P("INSERT INTO stl(u,k,q,n,ts) SELECT ?,?,?,?,? WHERE " + g, o.u, "buy", o.q, "USDT", now, no), P("UPDATE inv SET st='a',ts=? WHERE no=? AND st='p'", now, no)]);
           if (r[3].meta.changes != 1) return E("Already processed");
+          await payCommission(db, c, o.u, "inv:" + no, "stock", +o.tot, "usdt");
         } else {
           const r = await db.batch([P("UPDATE s SET v=CAST(MAX(0,CAST(v AS INTEGER)-?) AS TEXT) WHERE k='_sold' AND " + g, o.q, no), P("UPDATE inv SET st='x' WHERE no=? AND st='p'", no)]);
           if (r[1].meta.changes != 1) return E("Already processed");
@@ -373,13 +443,13 @@ async function run(rq, env) {
       isMain ? P("SELECT id,rl FROM admins ORDER BY id") : P("SELECT 1 x WHERE 0"),
       P("SELECT COUNT(*) n FROM u"),
       can("st") ? P("SELECT no,u,q,tot,tx,nm,ts FROM inv WHERE st='p' AND pm='usdt' ORDER BY ts LIMIT 100") : P("SELECT 1 x WHERE 0")]);
-    return J({ c: await getC(db, true), tk: r[0].results, w: r[1].results, od: r[2].results, ad: r[3].results, n: r[4].results[0].n, so: r[5].results, main: MAIN, im: isMain, rl: isMain ? [] : [...roles], usr, ex, sup: can("rt") ? { total: TOTAL_SUPPLY, cap: COMMUNITY_CAP, held: await heldSum(db, true) } : null });
+    return J({ c: await getC(db, true), tk: r[0].results, w: r[1].results, od: r[2].results, ad: r[3].results, n: r[4].results[0].n, so: r[5].results, main: MAIN, im: isMain, rl: isMain ? [] : [...roles], usr, ex, cmx: can("cm") ? { pool: +((await Q("SELECT b FROM cp WHERE id=1")) || { b: 0 }).b, ...(await Q("SELECT COALESCE(SUM(st='u'),0) un,COALESCE(SUM(st='p'),0) pn,COALESCE(SUM(CASE WHEN st='p' THEN amt END),0) pa,COALESCE(SUM(CASE WHEN st='u' THEN amt END),0) ua FROM cm")) } : null, sup: can("rt") ? { total: TOTAL_SUPPLY, cap: COMMUNITY_CAP, held: await heldSum(db, true) } : null });
   }
 
   // ------------------------------------------------------------ user actions
   switch (a) {
     case "me": break;
-    case "ms": await db.batch([P("INSERT OR IGNORE INTO mining(u,st) VALUES(?,0)", id), P("UPDATE mining SET st=? WHERE u=? AND st=0", now, id)]); break;
+    case "ms": await db.batch([P("INSERT OR IGNORE INTO mining(u,st) VALUES(?,0)", id), P("UPDATE mining SET st=? WHERE u=? AND st=0", now, id)]); await refCheck(db, env, c, id); break;
     case "mc": {
       if (!u.mst) return E("Start mining first");
       const m = Math.floor(Math.min(now - u.mst, 864e5) * er / 864e5 * 1e6) / 1e6;
@@ -404,6 +474,7 @@ async function run(rq, env) {
       if (t.o) st.push(P("UPDATE t SET l=l-1,st=IIF(l<=1,'x','a') WHERE id=? AND " + g, t.id, ...gb));
       st.push(P("UPDATE d SET c=1 WHERE u=? AND t=? AND y=? AND c=0", ...gb));
       const r = await db.batch(st); if (r[1].meta.changes != 1) return E("Already claimed");
+      await refCheck(db, env, c, id);
       break;
     }
     case "ck": {
@@ -414,8 +485,8 @@ async function run(rq, env) {
         const s = r.result.status; if (s == "left" || s == "kicked" || (s == "restricted" && !r.result.is_member)) return E("Join all channels first");
       }
       const ref = u.r && u.r != id ? await Q("SELECT id FROM u WHERE id=?", u.r) : null, g = "(SELECT c FROM u WHERE id=?)=0", st = [];
-      if (ref) { st.push(P("INSERT OR IGNORE INTO refs(referred,referrer,rw,ts) SELECT ?,?,?,? WHERE " + g, id, ref.id, N("refrw"), now, id)); st.push(P("UPDATE u SET p=ROUND(p+?,6),rc=rc+1 WHERE id=? AND " + g, N("refrw"), ref.id, id)) }
       st.push(P("UPDATE u SET c=1 WHERE id=? AND c=0", id)); await db.batch(st);
+      await refCheck(db, env, c, id);
       break;
     }
     case "rc": {
@@ -475,7 +546,8 @@ async function run(rq, env) {
       if (t2 && lv > 1) return E("You already have VVIP");
       const k = N(t2 ? "vc2" : "vc"), g = "(SELECT b FROM u WHERE id=?)>=?", gb = [id, k];
       const r = await db.batch([HS(id, "vip", -k, t2 ? "VVIP" : "VIP", g, gb), P("UPDATE u SET b=ROUND(b-?,6),vl=?,vx=? WHERE id=? AND " + g, k, t2 ? 2 : 1, FOREVER, id, ...gb)]);
-      if (r[1].meta.changes != 1) return E("Not enough coins"); break;
+      if (r[1].meta.changes != 1) return E("Not enough coins");
+      await payCommission(db, c, id, "bv:" + id + ":" + (t2 ? 2 : 1), "vip", k, "spc"); break;
     }
     case "vo": {
       const k = q.k, tx = String(q.tx || "").trim().toLowerCase();
@@ -524,7 +596,8 @@ async function run(rq, env) {
       const g = "(SELECT b FROM u WHERE id=?)>=? AND " + sg;
       const r = await db.batch([P(ins + g, no, id, qn, pr, "SPC", tot, "coin", "", "a", now, nm, un, lv, id, tot, qn, tt), HS(id, "stock", -tot, qn + " stock", mk, [no]), bump, hold,
         P("UPDATE stk SET n=n+? WHERE u=? AND " + mk, qn, id, no), P("INSERT INTO stl(u,k,q,n,ts) SELECT ?,?,?,?,? WHERE " + mk, id, "buy", qn, "SPC", now, no), P("UPDATE u SET b=ROUND(b-?,6) WHERE id=? AND " + mk, tot, id, no)]);
-      if (r[0].meta.changes != 1) return E("Not enough coins or stock sold out"); break;
+      if (r[0].meta.changes != 1) return E("Not enough coins or stock sold out");
+      await payCommission(db, c, id, "inv:" + no, "stock", tot, "spc"); break;
     }
     case "xs": {
       const qn = Math.floor(+q.q); if (!(qn >= 1 && qn <= 2000000)) return E("Enter a valid stock quantity");
@@ -540,7 +613,7 @@ async function run(rq, env) {
     case "wb": {
       if (!(u.ts > 0 && now - u.ts < 6048e5)) return E("The welcome bonus period has ended");
       const need = N("wbf"), rw = N("wbr"); if (!(rw > 0)) return E("Welcome bonus is off");
-      if (need > 0 && (await Q("SELECT COUNT(*) n FROM refs WHERE referrer=?", id)).n < need) return E("Invite " + need + " friends first");
+      if (need > 0 && (await Q("SELECT COUNT(*) n FROM refs WHERE referrer=? AND st='s'", id)).n < need) return E("Invite " + need + " friends first");
       if (!(await capOk(db, rw))) return E(CAPMSG);
       const g = "(SELECT COUNT(*) FROM wb WHERE u=?)<7 AND NOT EXISTS(SELECT 1 FROM wb WHERE u=? AND y=?)", gb = [id, id, today];
       const r = await db.batch([HS(id, "bonus", rw, "Welcome bonus", g, gb), P("UPDATE u SET b=ROUND(b+?,6) WHERE id=? AND " + g, rw, id, ...gb), P("INSERT INTO wb(u,y) SELECT ?,? WHERE " + g, id, today, ...gb)]);
@@ -550,11 +623,11 @@ async function run(rq, env) {
   }
   const r = await db.batch([P(SEL, id),
     P("SELECT t.id,t.url,t.rw,t.o,t.q,t.bl,d.s,d.c dc FROM t LEFT JOIN d ON d.u=? AND d.t=t.id AND d.y=IIF(t.q=1,'0',?) WHERE t.st='a' AND t.o!=? AND NOT (t.o>0 AND d.c=1) ORDER BY t.o,t.id LIMIT 40", id, today, id),
-    P("SELECT COUNT(*) n FROM refs WHERE referrer=?", id),
+    P("SELECT COUNT(*) n,COALESCE(SUM(st='p'),0) p,COALESCE(SUM(st='s'),0) s,COALESCE(SUM(CASE WHEN st='s' THEN rw END),0) e FROM refs WHERE referrer=?", id),
     P("SELECT n,fr FROM stk WHERE u=?", id),
     P("SELECT COUNT(*) n,COALESCE(SUM(y=?),0) t FROM wb WHERE u=?", today, id)]);
   u = r[0].results[0]; const l2 = u.vx > Date.now() ? u.vl : 0;
-  return J({ u: { id: u.id, n: u.n, un: u.un, b: u.b, p: u.p, c: u.c, r: u.r, sl: u.sl, ss: u.ss, mst: u.mst }, c, tk: r[1].results, rf: r[2].results[0].n, sk: r[3].results[0] || { n: 0, fr: 0 }, wb: { n: r[4].results[0].n, t: r[4].results[0].t, on: u.ts > 0 && Date.now() - u.ts < 6048e5, end: u.ts + 6048e5, rw: N("wbr"), need: N("wbf") }, bot: BOT_USER, now: Date.now(), adm, lv: l2, er: l2 ? N("vr") : N("rate") });
+  return J({ u: { id: u.id, n: u.n, un: u.un, b: u.b, p: u.p, c: u.c, r: u.r, sl: u.sl, ss: u.ss, mst: u.mst }, c, tk: r[1].results, rf: r[2].results[0].s, rfs: r[2].results[0], sk: r[3].results[0] || { n: 0, fr: 0 }, wb: { n: r[4].results[0].n, t: r[4].results[0].t, on: u.ts > 0 && Date.now() - u.ts < 6048e5, end: u.ts + 6048e5, rw: N("wbr"), need: N("wbf") }, bot: BOT_USER, now: Date.now(), adm, lv: l2, er: (l2 ? N("vr") : N("rate")) * (1 + Math.min(100, 5 * (+u.rc || 0)) / 100), bst: Math.min(100, 5 * (+u.rc || 0)) });
 }
 
 // ---------------------------------------------------------------- invoice PDF (no external libraries)
@@ -728,7 +801,7 @@ textarea{width:100%;padding:12px;margin:5px 0;border-radius:12px;border:1px soli
 <script>
 const VER='{{VER}}',GEAR='<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',CLOSE='<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>';
 const T=Telegram.WebApp,$=s=>document.getElementById(s);T.ready();T.expand();try{T.setHeaderColor('#070d0a');T.setBackgroundColor('#070d0a')}catch(e){}
-const ADM=['al','ar','as','at','ae','ad','ap','aw','ao','aa','au','ab','ag','sp','sq','so','sx'];
+const ADM=['al','ar','ac','cf','as','at','ae','ad','ap','aw','ao','aa','au','ab','ag','sp','sq','so','sx'];
 let S,off=0,tab='h',AD=0,pb=null,HI=null,BD=null,fsub='m',FM=null,FI=null;
 const CN='<svg viewBox="0 0 64 64" width="52" height="52"><defs><radialGradient id="cg" cx=".35" cy=".3"><stop offset="0" stop-color="#7dffc4"/><stop offset="1" stop-color="#0a8a52"/></radialGradient></defs><circle cx="32" cy="32" r="29" fill="url(#cg)" stroke="#f0d27a" stroke-width="3"/><circle cx="32" cy="32" r="23" fill="none" stroke="#03140a" stroke-opacity=".45" stroke-width="2"/><path d="M32 16v32M20 22l24 20M44 22L20 42" stroke="#03140a" stroke-width="2.5" stroke-linecap="round"/></svg>';
 let wsub='s';const OKM={sd:'Sent ✓',bv:'Badge activated ★',wd:'Withdrawal requested',pr:'Promo submitted',vo:'Order submitted for review',ms:'Mining started',fb:'Stock purchased ✓',fu:'USDT order submitted for review',ff:'Free stock claimed ✓',xs:'Stock sent ✓',wb:'Bonus claimed ✓',sp:'Entry posted ✓',sq:'Rules saved ✓',so:'Order processed ✓'};
@@ -738,7 +811,7 @@ const toast=m=>{const e=$('ts');e.textContent=m;e.className='on';clearTimeout(to
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>'&#'+c.charCodeAt(0)+';'),f=n=>{n=+n;return n!==0&&Math.abs(n)<0.01?String(+n.toFixed(6)):n.toFixed(2)},host=u=>String(u).replace(/^https?:[/][/]/,'').split('/')[0];
 const api=async(a,d)=>{try{const r=await(await fetch('/api',{method:'POST',body:JSON.stringify(Object.assign({i:T.initData},d||{},{a:a}))})).json();if(r.e){toast(r.e);return null}return r}catch(e){toast('Network error');return null}};
 const act=async(a,d)=>{const b0=S?S.u.b:0,r=await api(a,d);if(!r)return;
-if(ADM.indexOf(a)>-1){AD=r;if(r.ex){exportSheet(r.ex);r.ex=null}if(a=='sp'||a=='so')FM=null;if(a=='as'||a=='sq'||a=='ar'){await act('me');return}}
+if(ADM.indexOf(a)>-1){AD=r;if(r.ex){exportSheet(r.ex);r.ex=null}if(a=='sp'||a=='so')FM=null;if(a=='as'||a=='sq'||a=='ar'||a=='ac'){await act('me');return}}
 else{S=r;off=r.now-Date.now();if(a!='me')HI=null;if(a=='vo')BD=null;if(['fb','fu','ff','xs'].indexOf(a)>-1){FM=null;FI=null}}
 render();if(S&&S.u.b>b0+1e-9&&['mc','tc','rc','sc','wb'].indexOf(a)>-1){toast('+'+f(S.u.b-b0)+' SPC');try{T.HapticFeedback.notificationOccurred('success')}catch(e){}}else if(OKM[a])toast(OKM[a])};
 const L={rate:'Mining SPC / day',minc:'Min claim',refrw:'Referral reward',secs:'Task wait seconds (min 30)',dtr:'Default daily task reward',prw:'Promoted task reward',wd:'Withdraw (1 on, 0 off)',minw:'Min withdraw',ch:'Required channels (@a,@b)',dep:'USDT BEP20 deposit address',wl:'Withdraw address label',vp1:'VIP USDT',vp2:'VVIP USDT',vc:'VIP coin price',vc2:'VVIP coin price',vr:'VIP SPC/day',disc:'VIP promo discount %',mins:'Min send',srw:'Story reward',sm:'Story image URL (https)',spc:'Stock price (SPC coins)',spu:'Stock price (USDT)',stt:'Total stock limit',wbr:'Welcome bonus SPC per day',wbf:'Welcome bonus: referrals needed (0 = none)'};
@@ -753,10 +826,29 @@ return S.tk.length?'<div class="g">'+S.tk.map(R).join('')+'</div>':'<div class="
 function promo(){const P=[[1,5000,1,500,'visits'],[2,10000,2,1000,'visits'],[3,20000,4,1000,'unique visits']];
 return '<div class="c" data-f><b>🚀 Promote a link</b><p class="m">TikTok, Telegram or any https site. Members earn '+S.c.prw+' 🕷 per visit.</p><input name="url" placeholder="https://..."><select name="p">'+P.map(p=>'<option value="'+p[0]+'">'+p[3]+' '+p[4]+' · '+p[1]+' coins / '+p[2]+' USDT</option>').join('')+'</select><select name="pay"><option value="c">Pay with coins'+(S.lv?' (-'+S.c.disc+'%)':'')+'</option>'+(S.lv>1?'<option value="f">Free monthly (1k visits)</option>':'')+'<option value="u">Pay with USDT (BEP20)</option></select><input name="tx" placeholder="USDT TX hash (USDT only)"><p class="m">USDT address:</p>'+dep(S.c.dep)+'<p class="m">USDT orders are reviewed manually by an admin.</p><button class="b" data-a="pr">Submit</button></div>'}
 function tasks(){return story()+tl()+promo()}
-function refer(){const u=S.u,l='https://t.me/'+S.bot+'?start=r'+u.id;
-let x='<div class="c"><b>👥 Earn '+S.c.refrw+' 🕷 per referral</b><p class="m">Counts after your friend opens the app and joins all required channels.</p><input readonly value="'+l+'"><div class="g"><button class="b" data-a="cp" data-l="'+l+'">Copy</button><button class="b" data-a="sh" data-l="'+l+'">Share</button></div></div>';
-x+='<div class="c"><div class="g"><div><span class="m">Referrals</span><div class="big">'+S.rf+'</div></div><div><span class="m">Claimable</span><div class="big">'+f(u.p)+'</div></div></div><button class="b" data-a="rc"'+(u.p>0?'':' disabled')+'>Claim '+f(u.p)+'</button></div>';
-if(u.r&&!u.c)x+='<div class="c"><b>Join to activate your referrer</b>'+String(S.c.ch).split(',').filter(Boolean).map(h=>'<p><a data-a="ol" data-l="https://t.me/'+esc(h.trim().replace('@',''))+'" style="color:var(--a)">'+esc(h.trim())+'</a></p>').join('')+'<button class="b" data-a="ck">Verify</button></div>';
+let RFD=null,RFT=0;
+function web(){const L=(RFD&&RFD.l)||[],n=Math.min(L.length,24);
+let g='<svg viewBox="0 0 300 300" style="width:100%;max-width:340px;display:block;margin:6px auto">';
+[40,80,120].forEach(function(r){g+='<circle cx="150" cy="150" r="'+r+'" fill="none" stroke="var(--ln)" stroke-width="1"/>'});
+for(let i=0;i<n;i++){const an=Math.PI*2*i/Math.max(n,1)-Math.PI/2,x=150+110*Math.cos(an),y=150+110*Math.sin(an),ok=L[i].st=='s';
+g+='<line x1="150" y1="150" x2="'+x.toFixed(1)+'" y2="'+y.toFixed(1)+'" stroke="'+(ok?'var(--a)':'var(--ln)')+'" stroke-width="'+(ok?1.4:1)+'" opacity="'+(ok?.8:.6)+'"/>'}
+for(let i=0;i<n;i++){const an=Math.PI*2*i/Math.max(n,1)-Math.PI/2,x=150+110*Math.cos(an),y=150+110*Math.sin(an),ok=L[i].st=='s';
+g+='<circle cx="'+x.toFixed(1)+'" cy="'+y.toFixed(1)+'" r="'+(ok?8:6)+'" fill="'+(ok?'var(--a)':'none')+'" stroke="'+(ok?'var(--a)':'var(--mu)')+'" stroke-width="1.5" opacity="'+(ok?1:.55)+'"/>'}
+g+='<circle cx="150" cy="150" r="16" fill="var(--bg)" stroke="var(--gd)" stroke-width="2"/><text x="150" y="155" text-anchor="middle" font-size="14" fill="var(--gd)">You</text></svg>';
+return '<div class="c"><b>My Spider Web</b><p class="m">Bright = Successful. Dim = Pending.'+(L.length>24?' Showing 24 of '+L.length+'.':'')+'</p>'+g+'</div>'}
+function refer(){const u=S.u,l='https://t.me/'+S.bot+'?startapp=r'+u.id,s=S.rfs||{n:0,p:0,s:0,e:0},c=S.c;
+if(Date.now()-RFT>3e4){RFT=Date.now();api('rl').then(function(r){if(r){RFD=r;render()}})}
+let x='<div class="c"><b>👥 Earn '+c.refrw+' 🕷 per successful referral</b><input readonly value="'+l+'"><div class="g"><button class="b" data-a="cp" data-l="'+l+'">Copy link</button><button class="b" data-a="sh" data-l="'+l+'">Share</button></div></div>';
+x+='<div class="c"><div class="stat3"><div><span>Total</span><b>'+s.n+'</b></div><div><span>Pending</span><b>'+s.p+'</b></div><div><span>Successful</span><b>'+s.s+'</b></div></div><div class="r"><span class="m">Referral earnings</span><b>'+f(s.e)+' SPC</b></div><div class="r"><span class="m">Ready to claim</span><b>'+f(u.p)+' SPC</b></div><button class="b" data-a="rc"'+(u.p>0?'':' disabled')+'>Claim '+f(u.p)+' SPC</button></div>';
+x+='<div class="c"><b>Referral rules</b><p class="m">1. Share your link. 2. Your friend opens the app and joins the Official Channel. 3. Your friend starts mining or finishes one task. Then the referral is Successful and you get '+c.refrw+' SPC once. Until then it stays Pending. Self-referrals and fake accounts get nothing.</p><p class="m">Boost: each Successful referral adds +5% to your mining speed (max +100%). Now: +'+(S.bst||0)+'%.</p></div>';
+if(u.r&&!u.c)x+='<div class="c"><b>Join to activate your referrer</b>'+String(c.ch).split(',').filter(Boolean).map(h=>'<p><a data-a="ol" data-l="https://t.me/'+esc(h.trim().replace('@',''))+'" style="color:var(--a)">'+esc(h.trim())+'</a></p>').join('')+'<button class="b" data-a="ck">Verify</button></div>';
+x+=web();
+const cs=(RFD&&RFD.cs)||[],ca=n=>{const r=cs.find(z=>z.lvl==n);return r?r.a:0};
+x+='<div class="c"><b>Team commission</b><p class="m">You earn lifetime commission in SPC when people in your team buy stock or VIP/VVIP (with USDT or SPC). It is paid after the purchase is confirmed. Level 1 = '+c.cp1+'%, Level 2 = '+c.cp2+'%, Level 3 = '+c.cp3+'%.</p><div class="stat3"><div><span>Level 1</span><b>'+f(ca(1))+'</b></div><div><span>Level 2</span><b>'+f(ca(2))+'</b></div><div><span>Level 3</span><b>'+f(ca(3))+'</b></div></div>';
+const ch=(RFD&&RFD.ch)||[];
+x+=(ch.length?ch.map(h=>'<div class="r" style="border-bottom:1px solid var(--ln)"><span>Level '+h.lvl+' · '+(h.kd=='vip'?'VIP/VVIP':'Stock')+'<br><span class="m">'+new Date(h.ts).toLocaleString()+'</span></span><b style="color:var(--a)">+'+f(h.amt)+'</b></div>').join(''):'<p class="m">No commission yet.</p>')+'</div>';
+const L=(RFD&&RFD.l)||[];
+x+='<div class="c"><b>My referrals</b>'+(L.length?L.map(h=>'<div class="r" style="border-bottom:1px solid var(--ln)"><span>'+esc(h.n)+(h.un?' <span class="m">@'+esc(h.un)+'</span>':'')+'</span><b style="color:'+(h.st=='s'?'var(--a)':'var(--gd)')+'">'+(h.st=='s'?'Successful':'Pending')+'</b></div>').join(''):'<p class="m">No referrals yet.</p>')+'</div>';
 return x}
 function card(){const u=S.u,v=S.lv;
 return '<div class="vcard'+(v?' v'+v:'')+'"><div class="sh"></div><div class="vr"><span class="vbrand">SPIDER COIN</span>'+(v?bdg(v):'<span class="vl">STANDARD</span>')+'</div><div class="vr"><svg viewBox="0 0 44 34" width="44" height="34"><rect width="44" height="34" rx="6" fill="#e5c76b"/><path d="M0 11h14M0 23h14M30 11h14M30 23h14M14 0v34M30 0v34" stroke="#9a7424" stroke-width="1.2" fill="none"/><rect x="14" y="9" width="16" height="16" rx="3" fill="none" stroke="#9a7424" stroke-width="1.2"/></svg><svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#d9fbe9" stroke-width="2" stroke-linecap="round" opacity=".8"><path d="M8 8a6 6 0 010 8M12 5a10 10 0 010 14M16 2a14 14 0 010 20"/></svg></div><div><div class="vl">AVAILABLE BALANCE</div><div class="vamt">'+fm(u.b)+' <small style="font-size:13px;color:var(--gd)">SPC</small></div><div style="margin-top:4px;font-size:17px;font-weight:700;color:#f6dc8d;letter-spacing:.2px">'+uxs(u.b)+'</div></div><div class="vno">'+cno(u.id)+'</div><div class="vr"><div><div class="vl">CARD HOLDER</div><div class="vn">'+esc(u.n)+'</div></div><div><div class="vl">VISION 2037</div><div class="vn">'+(v?'LIFETIME':'MEMBER')+'</div></div><svg viewBox="0 0 48 30" width="48" height="30"><circle cx="17" cy="15" r="13" fill="#2dffa0" fill-opacity=".85"/><circle cx="31" cy="15" r="13" fill="#f0d27a" fill-opacity=".85"/></svg></div></div>'}
@@ -766,6 +858,9 @@ function uxs(n,rt){const x=ux(n,rt);return x?'\u2248 '+x+' USDT':''}
 function rateline(){return '<div class="m" style="text-align:center;margin:-4px 0 10px">1 SPC = <b>'+ux(1)+'</b> USDT</div>'}
 function ratecard(){const x=[1,100,1000,10000].map(n=>'<span>'+fk(n)+' SPC = <b>'+ux(n)+'</b> USDT</span>').join('');return '<div class="c"><b>SPC rate</b><div class="m" style="display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:6px">'+x+'</div></div>'}
 function homebal(){const u=S.u;return '<div class="c"><div class="r" style="padding:0"><span class="m">Your balance</span><b>'+fm(u.b)+' SPC</b></div><div class="m" style="text-align:right">'+uxs(u.b)+'</div></div>'+rateline()}
+function comm(){const x=AD.cmx||{pool:0,un:0,pn:0,pa:0,ua:0};
+return '<div class="c" data-f><b>Commission (paid in SPC from the pool)</b><p class="m">Percent of each stock or VIP/VVIP purchase made with USDT or SPC. Lifetime, 3 levels.</p><div class="g"><input name="cp1" inputmode="decimal" placeholder="Level 1 %" value="'+esc(AD.c.cp1)+'"><input name="cp2" inputmode="decimal" placeholder="Level 2 %" value="'+esc(AD.c.cp2)+'"><input name="cp3" inputmode="decimal" placeholder="Level 3 %" value="'+esc(AD.c.cp3)+'"></div><button class="b" data-a="ac">Save percentages</button></div>'
++'<div class="c" data-f><b>Commission pool</b><div class="stat3"><div><span>Pool</span><b>'+fk(Math.round(x.pool))+'</b></div><div><span>Paid</span><b>'+fk(Math.round(x.pa))+'</b></div><div><span>Unpaid</span><b>'+fk(Math.round(x.ua))+'</b></div></div><p class="m">Unpaid = the pool was empty or the supply cap was full ('+x.un+' records). Paid records: '+x.pn+'.</p><input name="amt" type="number" step="any" placeholder="Add SPC to the pool (use - to remove)"><button class="b" data-a="cf">Update pool</button></div>'}
 function ratesupply(){const s=AD.sup||{total:1e10,cap:5e9,held:0},p=s.cap?s.held/s.cap*100:0;
 return '<div class="c" data-f><b>SPC to USDT rate</b><p class="m">Price of 1 SPC in USDT, up to 10 decimals. Now: 1 SPC = '+esc(AD.c.urt)+' USDT</p><input name="urt" inputmode="decimal" value="'+esc(AD.c.urt)+'"><button class="b" data-a="ar">Save rate</button><div class="m" style="margin-top:6px">Old history keeps the rate it was made with.</div></div>'
 +'<div class="c"><b>Supply</b><div class="stat3"><div><span>Total supply</span><b>'+fk(s.total)+'</b></div><div><span>Community cap</span><b>'+fk(s.cap)+'</b></div><div><span>Held now</span><b>'+fk(Math.round(s.held))+'</b></div></div><div class="m">Used '+p.toFixed(2)+'% \u00b7 Room left '+fk(Math.max(0,Math.round(s.cap-s.held)))+' SPC</div>'+(p>=90?'<div class="m" style="color:var(--rd)">Warning: over 90% of the community cap is used.</div>':p>=80?'<div class="m" style="color:var(--gd)">Notice: over 80% of the community cap is used.</div>':'')+'</div>'}
@@ -774,7 +869,7 @@ function joinnote(){const hs=String(S.c.ch||'').split(',').map(h=>h.trim()).filt
 if(Date.now()-CMT>6e4){CMT=Date.now();api('cm').then(function(r){if(r){CM=r.m;render()}})}
 if(CM===true)return '';
 return '<div class="c" style="border-color:var(--gd)"><b>Official Channel is required</b><p class="m">You must join the Official Channel to send, receive and withdraw SPC.</p>'+hs.map(h=>'<button class="b" data-a="ol" data-l="https://t.me/'+esc(h.replace('@',''))+'">Join '+esc(h)+'</button>').join('')+'<p class="m">After joining, open this page again.</p></div>'}
-function wallet(){const u=S.u,v=S.lv,K={mc:'Mining',task:'Task',referral:'Referral',sent:'Sent',received:'Received',promo:'Promo',vip:'VIP',withdraw:'Withdraw',refund:'Refund',story:'Story',admin:'Admin',stock:'Stock',farm:'Farm profit',bonus:'Welcome bonus'};
+function wallet(){const u=S.u,v=S.lv,K={mc:'Mining',task:'Task',referral:'Referral',sent:'Sent',received:'Received',promo:'Promo',vip:'VIP',withdraw:'Withdraw',commission:'Commission',refund:'Refund',story:'Story',admin:'Admin',stock:'Stock',farm:'Farm profit',bonus:'Welcome bonus'};
 let x=card()+rateline()+'<div class="sg">'+[['s','Send'],['w','Withdraw'],['v','VIP'],['h','History']].map(t=>'<a data-a="ws" data-s="'+t[0]+'" class="'+(wsub==t[0]?'on':'')+'">'+t[1]+'</a>').join('')+'</div>';
 if(wsub=='s'){x+=joinnote();
 x+='<div class="c"><b>Your ID</b><div class="r"><span style="font-family:ui-monospace,monospace;font-size:18px;color:var(--a)">'+u.id+(u.un?'<br><span class="m">@'+esc(u.un)+'</span>':'')+'</span><button class="b" data-a="cp" data-l="'+u.id+'">Copy ID</button></div><p class="m">Share your ID so others can send you SPC.</p></div>';
@@ -830,7 +925,7 @@ h+='<div style="border-top:1px solid var(--ln);padding:8px 0;word-break:break-wo
 })}
 return h+'</div>'}
 function admin(){if(!AD||!AD.c){if(!AD){AD=1;act('al')}return '<p class="m">Loading…</p>'}
-const has=r=>AD.im||AD.rl.indexOf(r)>-1,RL=[['cfg','Settings'],['tk','Tasks'],['us','Users'],['wd','Withdrawals'],['od','Orders'],['st','Stock'],['lg','Error Logs'],['rt','Rates & Supply']];
+const has=r=>AD.im||AD.rl.indexOf(r)>-1,RL=[['cfg','Settings'],['tk','Tasks'],['us','Users'],['wd','Withdrawals'],['od','Orders'],['st','Stock'],['lg','Error Logs'],['rt','Rates & Supply'],['cm','Commission']];
 const bt=(a,id,ok,t,x)=>'<button class="b'+(x?' x':'')+'" data-a="'+a+'" data-id="'+id+'" data-ok="'+ok+'">'+t+'</button>';
 const cks=sel=>RL.map(r=>'<label class="ck"><input type="checkbox" value="'+r[0]+'"'+(sel.indexOf(r[0])>-1?' checked':'')+'>'+r[1]+'</label>').join('');
 let x='<div class="c"><b>🛠 Admin</b> <span class="m">App v'+VER+' · Users: '+AD.n+' · '+(AD.im?'Main Admin':'Roles: '+AD.rl.join(', '))+'</span></div>';
@@ -844,6 +939,7 @@ if(has('st')){x+='<div class="c" data-f><b>📈 Post market entry</b><p class="m
 x+='<div class="c"><b>Stock USDT orders</b>'+AD.so.map(o=>'<div class="r"><span>'+esc(o.nm||o.u)+' · ID '+o.u+'<br><span class="m">'+o.q+' stock · '+fm(o.tot)+' USDT<br>'+esc(o.tx)+'</span></span><button class="b" data-a="so" data-no="'+esc(o.no)+'" data-ok="1">✓</button><button class="b x" data-a="so" data-no="'+esc(o.no)+'" data-ok="">✕</button></div>').join('')+'</div>';
 x+='<div class="c" data-f><b>Stock rules (visible to all)</b><textarea name="str" rows="7" placeholder="Write the stock rules here...">'+esc(AD.c.str)+'</textarea><button class="b" data-a="sq">Save rules</button></div>'}
 if(has('rt'))x+=ratesupply();
+if(has('cm'))x+=comm();
 if(has('lg'))x+=errlog();
 if(AD.im){x+='<div class="c"><b>Stock holders sheet</b><p class="m">Name, numeric ID, badge, stocks and amount paid. Downloads a CSV and copies a table you can paste into Google Sheets.</p><button class="b gd" data-a="sx">Export holders</button></div>';
 x+='<div class="c"><b>Admins and roles</b><div class="r"><span>'+AD.main+' · Main Admin (all roles)</span></div>'+AD.ad.filter(z=>String(z.id)!=String(AD.main)).map(z=>'<div data-f style="border-top:1px solid var(--ln);padding:8px 0"><div class="r" style="padding:0"><b>'+z.id+'</b><button class="b x" data-a="aa" data-id="'+z.id+'" data-on="">Remove</button></div>'+cks(String(z.rl||'').split(','))+'<button class="b" data-a="aa" data-id="'+z.id+'" data-on="1">Save roles</button></div>').join('')+'<div data-f style="border-top:1px solid var(--ln);padding-top:8px"><input name="id" type="number" placeholder="Telegram numeric ID">'+cks(['cfg','tk','us','wd','od','st'])+'<button class="b" data-a="aa" data-on="1">Add admin</button></div></div>'}
@@ -859,7 +955,7 @@ if(F)F.querySelectorAll('input,select,textarea').forEach(i=>{if(i.name)d[i.name]
 if(a=='aa'&&F)d.rl=[].slice.call(F.querySelectorAll('input[type=checkbox]:checked')).map(i=>i.value).join(',');
 if(a=='tab'){tab=d.t;render();const p=$('app');p.classList.remove('fi');void p.offsetWidth;p.classList.add('fi')}
 else if(a=='v'){const l=d.url;if(l.indexOf('t.me/')>-1)T.openTelegramLink(l);else T.openLink(l);act('ts',{t:d.t})}
-else if(a=='sv'){try{T.shareToStory(S.c.sm,{text:'Mine Spider Coin with me!',widget_link:{url:'https://t.me/'+S.bot+'?start=r'+S.u.id,name:'Spider Coin'}})}catch(e){}act('ss')}
+else if(a=='sv'){try{T.shareToStory(S.c.sm,{text:'Mine Spider Coin with me!',widget_link:{url:'https://t.me/'+S.bot+'?startapp=r'+S.u.id,name:'Spider Coin'}})}catch(e){}act('ss')}
 else if(a=='lg'||a=='lc'||a=='lt'){(a=='lt'?api('lt').then(function(){return api('lg')}):api(a)).then(function(r){if(r&&r.lg){LG=r.lg;render()}})}
 else if(a=='cp'){try{navigator.clipboard.writeText(d.l).then(()=>toast('Copied ✓'),()=>cpf(d.l))}catch(e){cpf(d.l)}}
 else if(a=='sh')T.openTelegramLink('https://t.me/share/url?url='+encodeURIComponent(d.l)+'&text='+encodeURIComponent('Mine Spider Coin with me!'));
