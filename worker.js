@@ -1,5 +1,5 @@
 // =====================================================================
-// SPIDER COIN (SPC) - Telegram Mini App
+// SPIDER COIN (SPC) - Telegram Mini ApP
 // Single-file Cloudflare Worker (frontend + backend) + D1 database
 // Bindings: D1 "DB" | Secrets: BOT_TOKEN, WEBHOOK_SECRET | Optional var: ADMIN_ID
 // Version 1.1: Error Logs, Admin button at the top, tab names (Home, Ranking)
