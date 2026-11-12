@@ -6,19 +6,20 @@
 // Version 1.2: SPC to USDT rate (admin), USDT shown beside SPC, rate saved in history, community supply cap
 // Version 1.2.1: header balance pill removed, rate card replaced by one line, bigger USDT line on the card
 // Version 1.3: server-enforced 30s task timer, custom task button labels, Official Channel check for send and withdraw
+// Version 1.5: gift box (admin gifts with a label), welcome bonus popup, Double Reward event, 7-day check-in
 // Version 1.4: referral Pending/Successful, new startapp link, referral boost, 3-level commission (pool), Spider Web
 // =====================================================================
 const MAIN_ADMIN = "8825348718", ADMIN_USER = "Spider_Incom", BOT_USER = "SPC_Wallet_bot";
-const FOREVER = 4102444800000, SV = "10", APP_VERSION = "1.4";
+const FOREVER = 4102444800000, SV = "11", APP_VERSION = "1.5";
 // Supply: 10 billion SPC in total. The community (all user balances) may hold at most 50%.
 const TOTAL_SUPPLY = 1e10, CAP_PCT = 50, COMMUNITY_CAP = TOTAL_SUPPLY * CAP_PCT / 100;
 const CAPMSG = "The reward limit for the community supply is reached. Please try again later.";
 let SUP = { t: 0, v: 0 };
-const DEF = { rate: 10, minc: 5, refrw: 200, secs: 30, prw: 9.23, wd: 0, minw: 1000, ch: "", dep: "", wl: "USDT BEP20 address", vp1: 2, vp2: 10, vc: 1e5, vc2: 5e5, vr: 20, disc: 5, mins: 1000, srw: 100, sm: "", dtr: 15, spc: 25000, spu: 2, stt: 2000000, wbr: 100, wbf: 0, str: "", urt: "0.0001", cp1: 10, cp2: 5, cp3: 2.5 };
-const NK = ["rate", "minc", "refrw", "secs", "prw", "minw", "vp1", "vp2", "vc", "vc2", "vr", "disc", "mins", "srw", "dtr", "spc", "spu", "stt", "wbr", "wbf"];
+const DEF = { rate: 10, minc: 5, refrw: 200, secs: 30, prw: 9.23, wd: 0, minw: 1000, ch: "", dep: "", wl: "USDT BEP20 address", vp1: 2, vp2: 10, vc: 1e5, vc2: 5e5, vr: 20, disc: 5, mins: 1000, srw: 100, sm: "", dtr: 15, spc: 25000, spu: 2, stt: 2000000, wbr: 100, wbf: 0, str: "", urt: "0.0001", wbn: 1000, dbl: 1, dbs: 0, dbe: 0, ci1: 10, ci2: 15, ci3: 20, ci4: 25, ci5: 30, ci6: 40, ci7: 100, cp1: 10, cp2: 5, cp3: 2.5 };
+const NK = ["rate", "minc", "refrw", "secs", "prw", "minw", "vp1", "vp2", "vc", "vc2", "vr", "disc", "mins", "srw", "dtr", "spc", "spu", "stt", "wbr", "wbf", "wbn"];
 const PL = { 1: { c: 5e3, v: 500, q: 0 }, 2: { c: 1e4, v: 1000, q: 0 }, 3: { c: 2e4, v: 1000, q: 1 } };
-const ADM = new Set(["al", "as", "at", "ae", "ad", "ap", "aw", "ao", "aa", "au", "ab", "ag", "ar", "ac", "cf", "sp", "sq", "so", "sx"]);
-const ROLE = { as: "cfg", at: "tk", ae: "tk", ad: "tk", ap: "tk", aw: "wd", ao: "od", au: "us", ab: "us", ag: "us", ar: "rt", ac: "cm", cf: "cm", sp: "st", sq: "st", so: "st", sx: "main", aa: "main" };
+const ADM = new Set(["al", "as", "at", "ae", "ad", "ap", "aw", "ao", "aa", "au", "ab", "ag", "ar", "dv", "cr", "ac", "cf", "sp", "sq", "so", "sx"]);
+const ROLE = { as: "cfg", at: "tk", ae: "tk", ad: "tk", ap: "tk", aw: "wd", ao: "od", au: "us", ab: "us", ag: "us", ar: "rt", dv: "rw", cr: "rw", ac: "cm", cf: "cm", sp: "st", sq: "st", so: "st", sx: "main", aa: "main" };
 const J = (d, s = 200) => new Response(JSON.stringify(d), { status: s, headers: { "content-type": "application/json", "cache-control": "no-store" } });
 const tg = async (env, m, b) => { try { const r = await fetch("https://api.telegram.org/bot" + env.BOT_TOKEN + "/" + m, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(b) }); const j = await r.json(); if (j && j.ok === false && j.error_code !== 403) await logErr(env.DB, "bot", m, b && b.chat_id, "Telegram " + m + " failed: " + (j.description || j.error_code), "chat_id " + (b && b.chat_id)); return j } catch (e) { await logErr(env.DB, "bot", m, b && b.chat_id, e); return { ok: false } } };
 
@@ -86,7 +87,7 @@ async function payCommission(db, c, buyer, ref, kd, base, unit) {
 async function heldSum(db, fresh) {
   const n = Date.now();
   if (!fresh && SUP.t && n - SUP.t < 6e4) return SUP.v;
-  const r = await db.prepare("SELECT COALESCE(SUM(b),0) s FROM u").first();
+  const r = await db.prepare("SELECT COALESCE(SUM(b),0)+(SELECT COALESCE(SUM(amt),0) FROM gf WHERE st='p')+(SELECT COUNT(*) FROM u WHERE wc=0)*COALESCE((SELECT CAST(v AS REAL) FROM s WHERE k='wbn'),1000) s FROM u").first();
   SUP = { t: n, v: Number(r && r.s) || 0 }; return SUP.v;
 }
 async function capOk(db, add) {
@@ -124,7 +125,9 @@ async function init(db) {
       db.prepare("CREATE INDEX IF NOT EXISTS cmr ON cm(u,id)"),
       db.prepare("CREATE TABLE IF NOT EXISTS cp(id INTEGER PRIMARY KEY,b REAL DEFAULT 0)"),
       db.prepare("INSERT OR IGNORE INTO cp(id,b) VALUES(1,0)"),
-      db.prepare("CREATE TABLE IF NOT EXISTS el(id INTEGER PRIMARY KEY AUTOINCREMENT,sig TEXT UNIQUE,src TEXT,act TEXT,u INTEGER DEFAULT 0,msg TEXT,stk TEXT,n INTEGER DEFAULT 1,ts INTEGER,ls INTEGER)")]);
+      db.prepare("CREATE TABLE IF NOT EXISTS el(id INTEGER PRIMARY KEY AUTOINCREMENT,sig TEXT UNIQUE,src TEXT,act TEXT,u INTEGER DEFAULT 0,msg TEXT,stk TEXT,n INTEGER DEFAULT 1,ts INTEGER,ls INTEGER)"),
+      db.prepare("CREATE TABLE IF NOT EXISTS gf(id INTEGER PRIMARY KEY AUTOINCREMENT,u INTEGER,amt REAL,lb TEXT,ts INTEGER,st TEXT DEFAULT 'p',ct INTEGER DEFAULT 0)"),
+      db.prepare("CREATE TABLE IF NOT EXISTS ci(u INTEGER,y TEXT,d INTEGER,amt REAL,ts INTEGER,PRIMARY KEY(u,y))")]);
     const addCols = async (tbl, list) => {
       const cols = ((await db.prepare("PRAGMA table_info(" + tbl + ")").all()).results || []).map(r => r.name);
       for (const [n, t] of list) if (!cols.includes(n)) { try { await db.prepare("ALTER TABLE " + tbl + " ADD COLUMN " + n + " " + t).run() } catch (e) { } }
@@ -132,6 +135,9 @@ async function init(db) {
     await addCols("u", [["un", "TEXT DEFAULT ''"], ["vl", "INTEGER DEFAULT 0"], ["vx", "INTEGER DEFAULT 0"], ["fm", "TEXT DEFAULT ''"], ["sl", "INTEGER DEFAULT 0"], ["ss", "INTEGER DEFAULT 0"], ["rc", "INTEGER DEFAULT 0"], ["bn", "INTEGER DEFAULT 0"], ["ts", "INTEGER DEFAULT 0"], ["rg", "INTEGER DEFAULT 0"]]);
     await addCols("w", [["ts", "INTEGER DEFAULT 0"]]);
     await addCols("h", [["rt", "TEXT DEFAULT ''"]]);
+    const hadWc = ((await db.prepare("PRAGMA table_info(u)").all()).results || []).some(x => x.name == "wc");
+    await addCols("u", [["wc", "INTEGER DEFAULT 0"], ["cs", "INTEGER DEFAULT 0"], ["cd", "TEXT DEFAULT ''"]]);
+    if (!hadWc) await db.prepare("UPDATE u SET wc=2").run(); // users who already exist do not get the new-user welcome bonus
     await addCols("t", [["bl", "TEXT DEFAULT ''"]]);
     await addCols("refs", [["st", "TEXT DEFAULT 's'"]]);
     await db.prepare("INSERT OR IGNORE INTO refs(referred,referrer,rw,ts,st) SELECT id,r,0,0,'p' FROM u WHERE r>0 AND c=0").run();
@@ -153,6 +159,7 @@ async function init(db) {
       db.prepare("CREATE INDEX IF NOT EXISTS invs ON inv(st,pm,ts)"),
       db.prepare("CREATE INDEX IF NOT EXISTS stlu ON stl(u,id)"),
       db.prepare("CREATE INDEX IF NOT EXISTS els ON el(ls)"),
+      db.prepare("CREATE INDEX IF NOT EXISTS gfu ON gf(u,st)"),
       db.prepare("INSERT OR IGNORE INTO s(k,v) VALUES('_sold','0')"),
       db.prepare("INSERT OR REPLACE INTO s(k,v) VALUES('_sv',?)").bind(SV)]);
   }
@@ -245,6 +252,7 @@ async function run(rq, env) {
     HS = (w, k, m, n, g, gb) => P("INSERT INTO h(u,k,amt,ts,n,rt) SELECT ?,?,?,?,?,? WHERE " + g, w, k, m, now, n || "", String(c.urt), ...gb);
   const c = await getC(db, a == "wd" || ADM.has(a)), N = k => +c[k];
   c.secs = Math.max(30, +c.secs || 30);
+  const mult = (() => { const k = +c.dbl; return k > 1 && now >= +c.dbs && now <= +c.dbe ? k : 1 })(), R6 = x => Math.round(x * 1e6) / 1e6;
   const SEL = "SELECT u.*,COALESCE((SELECT st FROM mining WHERE u=u.id),0) mst,EXISTS(SELECT 1 FROM admins WHERE id=u.id) isa,(SELECT rl FROM admins WHERE id=u.id) arl FROM u WHERE u.id=?";
   const un = (us.username || "").toLowerCase(), nm = String(us.first_name || "User").slice(0, 64);
   const sp = IP.get("start_param") || "";
@@ -326,6 +334,18 @@ async function run(rq, env) {
         const m = Math.round(+q.amt * 1e6) / 1e6; if (!isFinite(m) || m === 0 || Math.abs(m) > 1e10) return E("Enter an amount (use - to take out of the pool)");
         const r = await X("UPDATE cp SET b=ROUND(b+?,6) WHERE id=1 AND b+?>=0", m, m); if (r.meta.changes != 1) return E("The pool cannot go below 0"); break;
       }
+      case "dv": {
+        if (String(q.stop) == "1") { await X("INSERT OR REPLACE INTO s(k,v) VALUES(?,?)", "dbe", String(now)); CC.d = null; break }
+        const k = Number(q.k), s0 = Math.floor(+q.s), e0 = Math.floor(+q.e);
+        if (!(k > 1 && k <= 10)) return E("Multiplier must be above 1 and at most 10");
+        if (!(s0 > 0 && e0 > s0 && e0 - s0 <= 30 * 864e5)) return E("Choose a start and an end time (up to 30 days)");
+        await db.batch([P("INSERT OR REPLACE INTO s(k,v) VALUES('dbl',?)", String(k)), P("INSERT OR REPLACE INTO s(k,v) VALUES('dbs',?)", String(s0)), P("INSERT OR REPLACE INTO s(k,v) VALUES('dbe',?)", String(e0))]); CC.d = null; break;
+      }
+      case "cr": {
+        const v = [];
+        for (let i = 1; i <= 7; i++) { const x = Math.round(Number(q["c" + i]) * 1e6) / 1e6; if (!(x > 0 && x <= 1e6)) return E("Enter a reward above 0 for Day " + i); v.push(x) }
+        await db.batch(v.map((x, i) => P("INSERT OR REPLACE INTO s(k,v) VALUES(?,?)", "ci" + (i + 1), String(x)))); CC.d = null; break;
+      }
       case "ar": {
         const v0 = String(q.urt === undefined ? "" : q.urt).trim();
         if (!/^[0-9]{1,6}([.][0-9]{1,10})?$/.test(v0) || !(Number(v0) > 0)) return E("Enter a rate above 0 with up to 10 decimals, for example 0.0001");
@@ -385,7 +405,7 @@ async function run(rq, env) {
         if (!(tid > 0)) return E("Enter a numeric Telegram ID");
         if (String(tid) == MAIN) return E("Main admin cannot be changed");
         if (ON) {
-          const rl = [...new Set(String(q.rl || "").split(",").map(x => x.trim()).filter(x => ["cfg", "tk", "us", "wd", "od", "st", "lg", "rt", "cm"].includes(x)))];
+          const rl = [...new Set(String(q.rl || "").split(",").map(x => x.trim()).filter(x => ["cfg", "tk", "us", "wd", "od", "st", "lg", "rt", "cm", "rw"].includes(x)))];
           if (!rl.length) return E("Choose at least one role");
           await X("INSERT INTO admins(id,by,ts,rl) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET rl=excluded.rl", tid, id, now, rl.join(","));
         } else await X("DELETE FROM admins WHERE id=?", tid);
@@ -430,7 +450,7 @@ async function run(rq, env) {
       case "ag": {
         const t = await find(String(tid)); if (!t) return E("User not found");
         const m = Math.round(Number(q.amt) * 1e6) / 1e6; if (!Number.isFinite(m) || m == 0 || Math.abs(m) > 1e9) return E("Enter a valid amount");
-        if (m > 0 && !(await capOk(db, m))) return E(CAPMSG);
+        if (m > 0) { if (!(await capOk(db, m))) return E(CAPMSG); await X("INSERT INTO gf(u,amt,lb,ts) VALUES(?,?,?,?)", t.id, m, String(q.lb || "").trim().slice(0, 30) || "Admin Gift", now); usr = await find(String(t.id)); break }
         const g = m > 0 ? "EXISTS(SELECT 1 FROM u WHERE id=?)" : "(SELECT b FROM u WHERE id=?)>=?", gb = m > 0 ? [t.id] : [t.id, -m];
         const r = await db.batch([HS(t.id, "admin", m, "Admin", g, gb), P("UPDATE u SET b=ROUND(b+?,6) WHERE id=? AND " + g, m, t.id, ...gb)]);
         if (r[1].meta.changes != 1) return E("User balance is too low"); usr = await find(String(t.id)); break;
@@ -443,7 +463,7 @@ async function run(rq, env) {
       isMain ? P("SELECT id,rl FROM admins ORDER BY id") : P("SELECT 1 x WHERE 0"),
       P("SELECT COUNT(*) n FROM u"),
       can("st") ? P("SELECT no,u,q,tot,tx,nm,ts FROM inv WHERE st='p' AND pm='usdt' ORDER BY ts LIMIT 100") : P("SELECT 1 x WHERE 0")]);
-    return J({ c: await getC(db, true), tk: r[0].results, w: r[1].results, od: r[2].results, ad: r[3].results, n: r[4].results[0].n, so: r[5].results, main: MAIN, im: isMain, rl: isMain ? [] : [...roles], usr, ex, cmx: can("cm") ? { pool: +((await Q("SELECT b FROM cp WHERE id=1")) || { b: 0 }).b, ...(await Q("SELECT COALESCE(SUM(st='u'),0) un,COALESCE(SUM(st='p'),0) pn,COALESCE(SUM(CASE WHEN st='p' THEN amt END),0) pa,COALESCE(SUM(CASE WHEN st='u' THEN amt END),0) ua FROM cm")) } : null, sup: can("rt") ? { total: TOTAL_SUPPLY, cap: COMMUNITY_CAP, held: await heldSum(db, true) } : null });
+    return J({ c: await getC(db, true), tk: r[0].results, w: r[1].results, od: r[2].results, ad: r[3].results, n: r[4].results[0].n, so: r[5].results, main: MAIN, im: isMain, rl: isMain ? [] : [...roles], usr, ex, gfx: can("rw") ? (await P("SELECT g.id,g.u,g.amt,g.lb,g.ts,g.st,u.n FROM gf g LEFT JOIN u ON u.id=g.u ORDER BY g.id DESC LIMIT 15").all()).results : [], cmx: can("cm") ? { pool: +((await Q("SELECT b FROM cp WHERE id=1")) || { b: 0 }).b, ...(await Q("SELECT COALESCE(SUM(st='u'),0) un,COALESCE(SUM(st='p'),0) pn,COALESCE(SUM(CASE WHEN st='p' THEN amt END),0) pa,COALESCE(SUM(CASE WHEN st='u' THEN amt END),0) ua FROM cm")) } : null, sup: can("rt") ? { total: TOTAL_SUPPLY, cap: COMMUNITY_CAP, held: await heldSum(db, true) } : null });
   }
 
   // ------------------------------------------------------------ user actions
@@ -452,8 +472,8 @@ async function run(rq, env) {
     case "ms": await db.batch([P("INSERT OR IGNORE INTO mining(u,st) VALUES(?,0)", id), P("UPDATE mining SET st=? WHERE u=? AND st=0", now, id)]); await refCheck(db, env, c, id); break;
     case "mc": {
       if (!u.mst) return E("Start mining first");
-      const m = Math.floor(Math.min(now - u.mst, 864e5) * er / 864e5 * 1e6) / 1e6;
-      if (!(m >= N("minc"))) return E("Minimum claim " + c.minc + " SPC");
+      const m0 = Math.floor(Math.min(now - u.mst, 864e5) * er / 864e5 * 1e6) / 1e6, m = R6(m0 * mult);
+      if (!(m0 >= N("minc"))) return E("Minimum claim " + c.minc + " SPC");
       if (!(await capOk(db, m))) return E(CAPMSG);
       const g = "(SELECT st FROM mining WHERE u=?)=?", gb = [id, u.mst];
       const r = await db.batch([HS(id, "mc", m, "", g, gb), P("UPDATE u SET b=ROUND(b+?,6) WHERE id=? AND " + g, m, id, ...gb), P("UPDATE mining SET st=0 WHERE u=? AND st=?", id, u.mst)]);
@@ -468,9 +488,9 @@ async function run(rq, env) {
       const k = await Q("SELECT s,c FROM d WHERE u=? AND t=? AND y=?", id, t.id, yy);
       if (!k) return E("Visit the link first"); if (k.c) return E("Already claimed");
       if (now - k.s < N("secs") * 1e3) return E("Wait " + Math.ceil(N("secs") - (now - k.s) / 1e3) + "s");
-      if (!(await capOk(db, +t.rw))) return E(CAPMSG);
+      const rwd = R6(+t.rw * mult); if (!(await capOk(db, rwd))) return E(CAPMSG);
       const g = "EXISTS(SELECT 1 FROM d WHERE u=? AND t=? AND y=? AND c=0)", gb = [id, t.id, yy];
-      const st = [HS(id, "task", t.rw, "", g, gb), P("UPDATE u SET b=ROUND(b+?,6) WHERE id=? AND " + g, t.rw, id, ...gb)];
+      const st = [HS(id, "task", rwd, "", g, gb), P("UPDATE u SET b=ROUND(b+?,6) WHERE id=? AND " + g, rwd, id, ...gb)];
       if (t.o) st.push(P("UPDATE t SET l=l-1,st=IIF(l<=1,'x','a') WHERE id=? AND " + g, t.id, ...gb));
       st.push(P("UPDATE d SET c=1 WHERE u=? AND t=? AND y=? AND c=0", ...gb));
       const r = await db.batch(st); if (r[1].meta.changes != 1) return E("Already claimed");
@@ -619,15 +639,42 @@ async function run(rq, env) {
       const r = await db.batch([HS(id, "bonus", rw, "Welcome bonus", g, gb), P("UPDATE u SET b=ROUND(b+?,6) WHERE id=? AND " + g, rw, id, ...gb), P("INSERT INTO wb(u,y) SELECT ?,? WHERE " + g, id, today, ...gb)]);
       if (r[1].meta.changes != 1) return E("Already claimed today (or all 7 claimed)"); break;
     }
+    case "gc": {
+      const gf = await Q("SELECT id,amt,lb FROM gf WHERE id=? AND u=? AND st='p'", Math.floor(+q.id), id);
+      if (!gf) return E("This reward was already claimed");
+      const g = "EXISTS(SELECT 1 FROM gf WHERE id=? AND u=? AND st='p')", gb = [gf.id, id];
+      const r = await db.batch([HS(id, "gift", gf.amt, gf.lb, g, gb), P("UPDATE u SET b=ROUND(b+?,6) WHERE id=? AND " + g, gf.amt, id, ...gb), P("UPDATE gf SET st='c',ct=? WHERE id=? AND u=? AND st='p'", now, gf.id, id)]);
+      if (r[1].meta.changes != 1) return E("This reward was already claimed"); break;
+    }
+    case "wn": {
+      const amt = N("wbn");
+      if (u.wc !== 0 || !(amt > 0)) return E("The welcome bonus is not available");
+      if (!(await capOk(db, amt))) return E(CAPMSG);
+      const g = "(SELECT wc FROM u WHERE id=?)=0", gb = [id];
+      const r = await db.batch([HS(id, "bonus", amt, "Welcome bonus", g, gb), P("UPDATE u SET b=ROUND(b+?,6),wc=1 WHERE id=? AND " + g, amt, id, ...gb)]);
+      if (r[1].meta.changes != 1) return E("The welcome bonus was already claimed"); break;
+    }
+    case "ci": {
+      if (u.cd == today) return E("You already checked in today");
+      const yst = new Date(now - 864e5).toISOString().slice(0, 10), sk = u.cd == yst ? (+u.cs || 0) : 0, day = sk >= 7 ? 1 : sk + 1, amt = N("ci" + day);
+      if (!(amt > 0)) return E("The check-in reward is not set");
+      if (!(await capOk(db, amt))) return E(CAPMSG);
+      const g = "(SELECT cd FROM u WHERE id=?)=?", gb = [id, u.cd || ""];
+      const r = await db.batch([HS(id, "checkin", amt, "Day " + day, g, gb), P("INSERT OR IGNORE INTO ci(u,y,d,amt,ts) SELECT ?,?,?,?,? WHERE " + g, id, today, day, amt, now, ...gb), P("UPDATE u SET b=ROUND(b+?,6),cs=?,cd=? WHERE id=? AND " + g, amt, day, today, id, ...gb)]);
+      if (r[2].meta.changes != 1) return E("You already checked in today"); break;
+    }
     default: return E("Unknown action");
   }
   const r = await db.batch([P(SEL, id),
     P("SELECT t.id,t.url,t.rw,t.o,t.q,t.bl,d.s,d.c dc FROM t LEFT JOIN d ON d.u=? AND d.t=t.id AND d.y=IIF(t.q=1,'0',?) WHERE t.st='a' AND t.o!=? AND NOT (t.o>0 AND d.c=1) ORDER BY t.o,t.id LIMIT 40", id, today, id),
     P("SELECT COUNT(*) n,COALESCE(SUM(st='p'),0) p,COALESCE(SUM(st='s'),0) s,COALESCE(SUM(CASE WHEN st='s' THEN rw END),0) e FROM refs WHERE referrer=?", id),
     P("SELECT n,fr FROM stk WHERE u=?", id),
-    P("SELECT COUNT(*) n,COALESCE(SUM(y=?),0) t FROM wb WHERE u=?", today, id)]);
+    P("SELECT COUNT(*) n,COALESCE(SUM(y=?),0) t FROM wb WHERE u=?", today, id),
+    P("SELECT id,amt,lb FROM gf WHERE u=? AND st='p' ORDER BY id LIMIT 5", id)]);
   u = r[0].results[0]; const l2 = u.vx > Date.now() ? u.vl : 0;
-  return J({ u: { id: u.id, n: u.n, un: u.un, b: u.b, p: u.p, c: u.c, r: u.r, sl: u.sl, ss: u.ss, mst: u.mst }, c, tk: r[1].results, rf: r[2].results[0].s, rfs: r[2].results[0], sk: r[3].results[0] || { n: 0, fr: 0 }, wb: { n: r[4].results[0].n, t: r[4].results[0].t, on: u.ts > 0 && Date.now() - u.ts < 6048e5, end: u.ts + 6048e5, rw: N("wbr"), need: N("wbf") }, bot: BOT_USER, now: Date.now(), adm, lv: l2, er: (l2 ? N("vr") : N("rate")) * (1 + Math.min(100, 5 * (+u.rc || 0)) / 100), bst: Math.min(100, 5 * (+u.rc || 0)) });
+  const yst2 = new Date(Date.now() - 864e5).toISOString().slice(0, 10), alive = u.cd == today || u.cd == yst2, skn = alive ? (+u.cs || 0) : 0, dn = u.cd == today, cnt = !dn && skn >= 7 ? 0 : skn;
+  const ck = { done: dn, n: cnt, nd: dn ? skn : cnt + 1, rw: [1, 2, 3, 4, 5, 6, 7].map(i => N("ci" + i)) };
+  return J({ u: { id: u.id, n: u.n, un: u.un, b: u.b, p: u.p, c: u.c, r: u.r, sl: u.sl, ss: u.ss, mst: u.mst }, c, tk: r[1].results, rf: r[2].results[0].s, rfs: r[2].results[0], sk: r[3].results[0] || { n: 0, fr: 0 }, wb: { n: r[4].results[0].n, t: r[4].results[0].t, on: u.ts > 0 && Date.now() - u.ts < 6048e5, end: u.ts + 6048e5, rw: N("wbr"), need: N("wbf") }, bot: BOT_USER, now: Date.now(), adm, lv: l2, er: (l2 ? N("vr") : N("rate")) * (1 + Math.min(100, 5 * (+u.rc || 0)) / 100), bst: Math.min(100, 5 * (+u.rc || 0)), gf: r[5].results, wn: u.wc === 0 ? N("wbn") : 0, ck });
 }
 
 // ---------------------------------------------------------------- invoice PDF (no external libraries)
@@ -738,7 +785,7 @@ nav a{display:flex;flex-direction:column;align-items:center;gap:3px;padding:7px 
 header{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:10px;height:58px;margin:0 -12px;padding:0 12px;background:rgba(3,10,6,.94);backdrop-filter:blur(8px);border-bottom:1px solid var(--ln)}
 .av{flex:none;width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#2dffa0,#0a8a52);color:#02140a;display:grid;place-items:center;font-weight:800;border:2px solid var(--gd)}
 .tt{flex:1;min-width:0;display:flex;flex-direction:column}.tt b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.tt span{font-size:12px;color:var(--mu)}
-.pill{padding:6px 12px;border:1px solid var(--gd);border-radius:18px;font-weight:700;flex:none;font-variant-numeric:tabular-nums;color:var(--gd)}.pg{padding-top:12px}.gr{flex:none;width:36px;height:36px;border-radius:50%;border:1px solid var(--gd);color:var(--gd);display:grid;place-items:center;background:rgba(240,210,122,.06);cursor:pointer}.gr:active{transform:scale(.94)}
+.pill{padding:6px 12px;border:1px solid var(--gd);border-radius:18px;font-weight:700;flex:none;font-variant-numeric:tabular-nums;color:var(--gd)}.pg{padding-top:12px}.gr{flex:none;width:36px;height:36px;border-radius:50%;border:1px solid var(--gd);color:var(--gd);display:grid;place-items:center;background:rgba(240,210,122,.06);cursor:pointer}.gr:active{transform:scale(.94)}#pp{position:fixed;inset:0;z-index:50;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.74);padding:18px}#pp.on{display:flex}.pbox{width:100%;max-width:340px;text-align:center;background:linear-gradient(160deg,#0b2217,#06120b);border:1px solid var(--gd);border-radius:22px;padding:26px 18px;box-shadow:0 0 40px rgba(45,255,160,.18)}.gift{font-size:64px;animation:gb 1.4s ease-in-out infinite}@keyframes gb{0%,100%{transform:translateY(0) rotate(-4deg)}50%{transform:translateY(-8px) rotate(4deg)}}
 .pl{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--a);animation:pl 1.2s infinite}@keyframes pl{50%{opacity:.25;transform:scale(1.6)}}
 .fi{animation:fi .22s}@keyframes fi{from{opacity:0;transform:translateY(8px)}}
 #ts{position:fixed;top:66px;left:50%;transform:translate(-50%,-16px);background:#0d2418;border:1px solid var(--a);padding:10px 16px;border-radius:20px;opacity:0;transition:.25s;pointer-events:none;z-index:9;font-weight:700;max-width:92%;text-align:center}#ts.on{opacity:1;transform:translate(-50%,0)}
@@ -797,11 +844,11 @@ header{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:10px;
 textarea{width:100%;padding:12px;margin:5px 0;border-radius:12px;border:1px solid var(--ln);background:#040c07;color:#e8fff2;font-size:15px;font-family:inherit}
 .chp{display:inline-block;padding:2px 9px;border-radius:12px;font-size:10px;font-weight:800;letter-spacing:.5px}.chp.a{background:rgba(61,220,151,.15);color:#3ddc97}.chp.p{background:rgba(240,210,122,.15);color:var(--gd)}.chp.x{background:rgba(255,84,112,.15);color:var(--rd)}
 @media(prefers-reduced-motion:reduce){*{animation:none!important}}
-</style></head><body><div id="app"><p class="m" style="padding:40px;text-align:center">Loading…</p></div><div id="ts"></div><nav id="nav"></nav>
+</style></head><body><div id="app"><p class="m" style="padding:40px;text-align:center">Loading…</p></div><div id="ts"></div><div id="pp"></div><nav id="nav"></nav>
 <script>
 const VER='{{VER}}',GEAR='<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',CLOSE='<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>';
 const T=Telegram.WebApp,$=s=>document.getElementById(s);T.ready();T.expand();try{T.setHeaderColor('#070d0a');T.setBackgroundColor('#070d0a')}catch(e){}
-const ADM=['al','ar','ac','cf','as','at','ae','ad','ap','aw','ao','aa','au','ab','ag','sp','sq','so','sx'];
+const ADM=['al','ar','dv','cr','ac','cf','as','at','ae','ad','ap','aw','ao','aa','au','ab','ag','sp','sq','so','sx'];
 let S,off=0,tab='h',AD=0,pb=null,HI=null,BD=null,fsub='m',FM=null,FI=null;
 const CN='<svg viewBox="0 0 64 64" width="52" height="52"><defs><radialGradient id="cg" cx=".35" cy=".3"><stop offset="0" stop-color="#7dffc4"/><stop offset="1" stop-color="#0a8a52"/></radialGradient></defs><circle cx="32" cy="32" r="29" fill="url(#cg)" stroke="#f0d27a" stroke-width="3"/><circle cx="32" cy="32" r="23" fill="none" stroke="#03140a" stroke-opacity=".45" stroke-width="2"/><path d="M32 16v32M20 22l24 20M44 22L20 42" stroke="#03140a" stroke-width="2.5" stroke-linecap="round"/></svg>';
 let wsub='s';const OKM={sd:'Sent ✓',bv:'Badge activated ★',wd:'Withdrawal requested',pr:'Promo submitted',vo:'Order submitted for review',ms:'Mining started',fb:'Stock purchased ✓',fu:'USDT order submitted for review',ff:'Free stock claimed ✓',xs:'Stock sent ✓',wb:'Bonus claimed ✓',sp:'Entry posted ✓',sq:'Rules saved ✓',so:'Order processed ✓'};
@@ -813,10 +860,10 @@ const api=async(a,d)=>{try{const r=await(await fetch('/api',{method:'POST',body:
 const act=async(a,d)=>{const b0=S?S.u.b:0,r=await api(a,d);if(!r)return;
 if(ADM.indexOf(a)>-1){AD=r;if(r.ex){exportSheet(r.ex);r.ex=null}if(a=='sp'||a=='so')FM=null;if(a=='as'||a=='sq'||a=='ar'||a=='ac'){await act('me');return}}
 else{S=r;off=r.now-Date.now();if(a!='me')HI=null;if(a=='vo')BD=null;if(['fb','fu','ff','xs'].indexOf(a)>-1){FM=null;FI=null}}
-render();if(S&&S.u.b>b0+1e-9&&['mc','tc','rc','sc','wb'].indexOf(a)>-1){toast('+'+f(S.u.b-b0)+' SPC');try{T.HapticFeedback.notificationOccurred('success')}catch(e){}}else if(OKM[a])toast(OKM[a])};
-const L={rate:'Mining SPC / day',minc:'Min claim',refrw:'Referral reward',secs:'Task wait seconds (min 30)',dtr:'Default daily task reward',prw:'Promoted task reward',wd:'Withdraw (1 on, 0 off)',minw:'Min withdraw',ch:'Required channels (@a,@b)',dep:'USDT BEP20 deposit address',wl:'Withdraw address label',vp1:'VIP USDT',vp2:'VVIP USDT',vc:'VIP coin price',vc2:'VVIP coin price',vr:'VIP SPC/day',disc:'VIP promo discount %',mins:'Min send',srw:'Story reward',sm:'Story image URL (https)',spc:'Stock price (SPC coins)',spu:'Stock price (USDT)',stt:'Total stock limit',wbr:'Welcome bonus SPC per day',wbf:'Welcome bonus: referrals needed (0 = none)'};
+render();if(S&&S.u.b>b0+1e-9&&['mc','tc','rc','sc','wb','gc','wn','ci'].indexOf(a)>-1){toast('+'+f(S.u.b-b0)+' SPC');try{T.HapticFeedback.notificationOccurred('success')}catch(e){}}else if(OKM[a])toast(OKM[a])};
+const L={wbn:'Welcome bonus SPC (new users)',rate:'Mining SPC / day',minc:'Min claim',refrw:'Referral reward',secs:'Task wait seconds (min 30)',dtr:'Default daily task reward',prw:'Promoted task reward',wd:'Withdraw (1 on, 0 off)',minw:'Min withdraw',ch:'Required channels (@a,@b)',dep:'USDT BEP20 deposit address',wl:'Withdraw address label',vp1:'VIP USDT',vp2:'VVIP USDT',vc:'VIP coin price',vc2:'VVIP coin price',vr:'VIP SPC/day',disc:'VIP promo discount %',mins:'Min send',srw:'Story reward',sm:'Story image URL (https)',spc:'Stock price (SPC coins)',spu:'Stock price (USDT)',stt:'Total stock limit',wbr:'Welcome bonus SPC per day',wbf:'Welcome bonus: referrals needed (0 = none)'};
 function home(){const u=S.u,m=u.mst;
-return homebal()+'<div class="c mine"><span class="st'+(m?' on':'')+'">'+(m?'<i class="pl"></i>MINING LIVE':'● IDLE')+'</span>'+(S.lv?'<div class="m" style="margin-top:8px">'+bdg(S.lv)+' boost active</div>':'')+'<div class="ringw"><svg class="ring" viewBox="0 0 200 200"><defs><linearGradient id="gr" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2dffa0"/><stop offset="1" stop-color="#f0d27a"/></linearGradient></defs><circle class="rb" cx="100" cy="100" r="88"/><circle class="rf" id="rg" cx="100" cy="100" r="88"/></svg><div class="rin"><div class="coin3">'+CN+'</div><div class="big" id="mn">0.000000</div><span class="m" id="pc">SPC mined</span></div></div><div class="stat3"><div><span>Per day</span><b>'+S.er+'</b></div><div><span>Per hour</span><b>'+(S.er/24).toFixed(2)+'</b></div><div><span>Min claim</span><b>'+S.c.minc+'</b></div></div>'+(m?'<button class="b" id="cb" data-a="mc" disabled>Claim SPC</button>':'<button class="b" data-a="ms">▶ Start mining</button>')+'</div>'+wbc()+'<p class="m" style="text-align:center">Support @{{AU}}</p>'}
+return dblbar()+homebal()+'<div class="c mine"><span class="st'+(m?' on':'')+'">'+(m?'<i class="pl"></i>MINING LIVE':'● IDLE')+'</span>'+(S.lv?'<div class="m" style="margin-top:8px">'+bdg(S.lv)+' boost active</div>':'')+'<div class="ringw"><svg class="ring" viewBox="0 0 200 200"><defs><linearGradient id="gr" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2dffa0"/><stop offset="1" stop-color="#f0d27a"/></linearGradient></defs><circle class="rb" cx="100" cy="100" r="88"/><circle class="rf" id="rg" cx="100" cy="100" r="88"/></svg><div class="rin"><div class="coin3">'+CN+'</div><div class="big" id="mn">0.000000</div><span class="m" id="pc">SPC mined</span></div></div><div class="stat3"><div><span>Per day</span><b>'+S.er+'</b></div><div><span>Per hour</span><b>'+(S.er/24).toFixed(2)+'</b></div><div><span>Min claim</span><b>'+S.c.minc+'</b></div></div>'+(m?'<button class="b" id="cb" data-a="mc" disabled>Claim SPC</button>':'<button class="b" data-a="ms">▶ Start mining</button>')+'</div>'+wbc()+'<p class="m" style="text-align:center">Support @{{AU}}</p>'}
 function story(){if(!S.c.sm)return '';const u=S.u,n=Date.now()+off,wt=u.sl&&n-u.sl<6048e5,rem=u.ss?Math.ceil(S.c.secs-(n-u.ss)/1e3):0;
 return '<div class="c"><b>Telegram story</b><p class="m">Post a story and earn '+S.c.srw+' SPC, once every 7 days.</p>'+(wt?'<button class="b" disabled>Next in '+Math.ceil((6048e5-(n-u.sl))/864e5)+'d</button>':!u.ss?'<button class="b" data-a="sv">Post story</button>':rem>0?'<button class="b" disabled>⏳ '+rem+'s</button>':'<button class="b" data-a="sc">Claim '+S.c.srw+'</button>')+'</div>'}
 function tl(){const R=k=>{const rem=k.s?Math.ceil(S.c.secs-(Date.now()+off-k.s)/1e3):0;
@@ -825,7 +872,23 @@ return '<div class="c"><span class="m">'+(k.o?'Promoted':'Daily')+'</span>'+(k.b
 return S.tk.length?'<div class="g">'+S.tk.map(R).join('')+'</div>':'<div class="c m">No tasks yet. Come back soon.</div>'}
 function promo(){const P=[[1,5000,1,500,'visits'],[2,10000,2,1000,'visits'],[3,20000,4,1000,'unique visits']];
 return '<div class="c" data-f><b>🚀 Promote a link</b><p class="m">TikTok, Telegram or any https site. Members earn '+S.c.prw+' 🕷 per visit.</p><input name="url" placeholder="https://..."><select name="p">'+P.map(p=>'<option value="'+p[0]+'">'+p[3]+' '+p[4]+' · '+p[1]+' coins / '+p[2]+' USDT</option>').join('')+'</select><select name="pay"><option value="c">Pay with coins'+(S.lv?' (-'+S.c.disc+'%)':'')+'</option>'+(S.lv>1?'<option value="f">Free monthly (1k visits)</option>':'')+'<option value="u">Pay with USDT (BEP20)</option></select><input name="tx" placeholder="USDT TX hash (USDT only)"><p class="m">USDT address:</p>'+dep(S.c.dep)+'<p class="m">USDT orders are reviewed manually by an admin.</p><button class="b" data-a="pr">Submit</button></div>'}
-function tasks(){return story()+tl()+promo()}
+let PPX={};
+function popup(){const p=$('pp');if(!p||!S)return;let h='';
+const g=(S.gf||[]).find(function(x){return !PPX['g'+x.id]});
+if(g)h='<div class="pbox"><div class="gift">🎁</div><b style="font-size:20px;color:var(--gd)">Congratulations!</b><div style="margin:4px 0 8px">Your Reward</div><div class="m">'+esc(g.lb)+'</div><div style="font-size:30px;font-weight:800;color:var(--a);margin:8px 0 2px">+'+fk(g.amt)+' SPC</div><div class="m" style="margin-bottom:14px">'+uxs(g.amt)+'</div><button class="b" data-a="gc" data-id="'+g.id+'">Claim reward</button><div class="m" style="margin-top:12px"><a data-a="pl" data-k="g'+g.id+'">Later</a></div></div>';
+else if(S.wn>0&&!PPX.wn)h='<div class="pbox"><div class="gift">🕷️</div><b style="font-size:20px;color:var(--gd)">Welcome to SPIDER COMMUNITY!</b><div class="m" style="margin:6px 0">Your welcome bonus is ready</div><div style="font-size:30px;font-weight:800;color:var(--a);margin:8px 0 2px">+'+fk(S.wn)+' SPC</div><div class="m" style="margin-bottom:14px">'+uxs(S.wn)+'</div><button class="b" data-a="wn">Claim bonus</button><div class="m" style="margin-top:12px"><a data-a="pl" data-k="wn">Later</a></div></div>';
+p.className=h?'on':'';p.innerHTML=h}
+function dblbar(){const k=+S.c.dbl,n=Date.now()+off;if(k>1&&n>=+S.c.dbs&&n<=+S.c.dbe)return '<div class="c" style="border-color:var(--gd);text-align:center">⚡ <b>Double Reward x'+k+' is ON</b><div class="m">Task rewards and mining claims. Ends '+new Date(+S.c.dbe).toLocaleString()+'</div></div>';return ''}
+function checkin(){const k=S.ck;if(!k)return '';let t='';
+for(let i=1;i<=7;i++){const dn=i<=k.n,cur=!k.done&&i==k.nd;
+t+='<div style="border:1px solid '+(cur?'var(--gd)':'var(--ln)')+';border-radius:12px;padding:8px 4px;text-align:center;background:'+(dn?'rgba(45,255,160,.12)':'transparent')+'"><div class="m">Day '+i+'</div><b style="color:'+(dn?'var(--a)':'var(--gd)')+'">'+fk(k.rw[i-1])+'</b><div class="m">'+(dn?'✓':cur?'Today':'🔒')+'</div></div>'}
+return '<div class="c"><b>Daily Check-in</b><p class="m">Streak: '+k.n+' day'+(k.n==1?'':'s')+'</p><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(64px,1fr));gap:6px;margin:8px 0">'+t+'</div>'+(k.done?'<button class="b" disabled>Checked in today ✓</button>':'<button class="b" data-a="ci">Claim Day '+k.nd+' · +'+fk(k.rw[k.nd-1])+' SPC</button>')+'<p class="m">One claim per day. If you miss a day, the streak starts again at Day 1. After Day 7 it starts again at Day 1. Resets at 00:00 UTC.</p></div>'}
+function rewardsadm(){const c=AD.c,n=Date.now(),on=+c.dbl>1&&n>=+c.dbs&&n<=+c.dbe;
+let x='<div class="c" data-f><b>Double Reward event</b><p class="m">'+(on?'ON now: x'+esc(c.dbl)+' until '+new Date(+c.dbe).toLocaleString():'No event is running.')+' It applies to task rewards and mining claims made during the event.</p><input name="k" type="number" step="any" placeholder="Multiplier (for example 2)"><div class="m">Start</div><input name="s" type="datetime-local"><div class="m">End</div><input name="e" type="datetime-local"><div class="g"><button class="b" data-a="dv">Start event</button>'+(on?'<button class="b x" data-a="dv" data-stop="1">Stop now</button>':'')+'</div></div>';
+x+='<div class="c" data-f><b>Daily check-in rewards (SPC)</b>'+[1,2,3,4,5,6,7].map(function(i){return '<div class="r" style="padding:2px 0"><span class="m">Day '+i+'</span><input name="c'+i+'" type="number" step="any" value="'+esc(c['ci'+i])+'" style="max-width:120px"></div>'}).join('')+'<button class="b" data-a="cr">Save rewards</button></div>';
+x+='<div class="c"><b>Gifts</b><p class="m">Give coins from the Users section with a label. The user sees a gift popup and taps Claim.</p>'+(AD.gfx&&AD.gfx.length?AD.gfx.map(function(g){return '<div class="r" style="border-bottom:1px solid var(--ln)"><span>'+esc(g.n||g.u)+' · '+esc(g.lb)+'<br><span class="m">'+new Date(g.ts).toLocaleString()+'</span></span><span style="text-align:right"><b>+'+fk(g.amt)+'</b><br><span class="m">'+(g.st=='c'?'Claimed':'Unclaimed')+'</span></span></div>'}).join(''):'<p class="m">No gifts yet.</p>')+'</div>';
+return x}
+function tasks(){return dblbar()+checkin()+story()+tl()+promo()}
 let RFD=null,RFT=0;
 function web(){const L=(RFD&&RFD.l)||[],n=Math.min(L.length,24);
 let g='<svg viewBox="0 0 300 300" style="width:100%;max-width:340px;display:block;margin:6px auto">';
@@ -869,7 +932,7 @@ function joinnote(){const hs=String(S.c.ch||'').split(',').map(h=>h.trim()).filt
 if(Date.now()-CMT>6e4){CMT=Date.now();api('cm').then(function(r){if(r){CM=r.m;render()}})}
 if(CM===true)return '';
 return '<div class="c" style="border-color:var(--gd)"><b>Official Channel is required</b><p class="m">You must join the Official Channel to send, receive and withdraw SPC.</p>'+hs.map(h=>'<button class="b" data-a="ol" data-l="https://t.me/'+esc(h.replace('@',''))+'">Join '+esc(h)+'</button>').join('')+'<p class="m">After joining, open this page again.</p></div>'}
-function wallet(){const u=S.u,v=S.lv,K={mc:'Mining',task:'Task',referral:'Referral',sent:'Sent',received:'Received',promo:'Promo',vip:'VIP',withdraw:'Withdraw',commission:'Commission',refund:'Refund',story:'Story',admin:'Admin',stock:'Stock',farm:'Farm profit',bonus:'Welcome bonus'};
+function wallet(){const u=S.u,v=S.lv,K={mc:'Mining',task:'Task',referral:'Referral',sent:'Sent',received:'Received',promo:'Promo',vip:'VIP',withdraw:'Withdraw',commission:'Commission',refund:'Refund',story:'Story',admin:'Admin',stock:'Stock',farm:'Farm profit',bonus:'Welcome bonus',gift:'Gift',checkin:'Daily check-in'};
 let x=card()+rateline()+'<div class="sg">'+[['s','Send'],['w','Withdraw'],['v','VIP'],['h','History']].map(t=>'<a data-a="ws" data-s="'+t[0]+'" class="'+(wsub==t[0]?'on':'')+'">'+t[1]+'</a>').join('')+'</div>';
 if(wsub=='s'){x+=joinnote();
 x+='<div class="c"><b>Your ID</b><div class="r"><span style="font-family:ui-monospace,monospace;font-size:18px;color:var(--a)">'+u.id+(u.un?'<br><span class="m">@'+esc(u.un)+'</span>':'')+'</span><button class="b" data-a="cp" data-l="'+u.id+'">Copy ID</button></div><p class="m">Share your ID so others can send you SPC.</p></div>';
@@ -925,7 +988,7 @@ h+='<div style="border-top:1px solid var(--ln);padding:8px 0;word-break:break-wo
 })}
 return h+'</div>'}
 function admin(){if(!AD||!AD.c){if(!AD){AD=1;act('al')}return '<p class="m">Loading…</p>'}
-const has=r=>AD.im||AD.rl.indexOf(r)>-1,RL=[['cfg','Settings'],['tk','Tasks'],['us','Users'],['wd','Withdrawals'],['od','Orders'],['st','Stock'],['lg','Error Logs'],['rt','Rates & Supply'],['cm','Commission']];
+const has=r=>AD.im||AD.rl.indexOf(r)>-1,RL=[['cfg','Settings'],['tk','Tasks'],['us','Users'],['wd','Withdrawals'],['od','Orders'],['st','Stock'],['lg','Error Logs'],['rt','Rates & Supply'],['rw','Gifts & Rewards'],['cm','Commission']];
 const bt=(a,id,ok,t,x)=>'<button class="b'+(x?' x':'')+'" data-a="'+a+'" data-id="'+id+'" data-ok="'+ok+'">'+t+'</button>';
 const cks=sel=>RL.map(r=>'<label class="ck"><input type="checkbox" value="'+r[0]+'"'+(sel.indexOf(r[0])>-1?' checked':'')+'>'+r[1]+'</label>').join('');
 let x='<div class="c"><b>🛠 Admin</b> <span class="m">App v'+VER+' · Users: '+AD.n+' · '+(AD.im?'Main Admin':'Roles: '+AD.rl.join(', '))+'</span></div>';
@@ -934,10 +997,11 @@ if(has('tk')){x+='<div class="c"><b>Daily tasks (max 10)</b>'+AD.tk.filter(k=>!k
 x+='<div class="c"><b>Promo orders</b>'+AD.tk.filter(k=>k.o).map(k=>'<div class="r"><span>'+esc(k.url)+'<br><span class="m">owner '+k.o+' · left '+k.l+(k.st=='p'?' · '+esc(k.x):'')+'</span></span>'+(k.st=='p'?bt('ap',k.id,'1','✓')+bt('ap',k.id,'','✕',1):bt('ad',k.id,'','✕',1))+'</div>').join('')+'</div>'}
 if(has('od'))x+='<div class="c"><b>VIP orders</b>'+AD.od.map(o=>'<div class="r"><span>'+o.u+' · '+o.k+'<br><span class="m">'+esc(o.tx)+'</span></span>'+bt('ao',o.id,'1','✓')+bt('ao',o.id,'','✕',1)+'</div>').join('')+'</div>';
 if(has('wd'))x+='<div class="c"><b>Withdraw requests</b>'+AD.w.map(w=>'<div class="r"><span>'+w.u+(w.lv>1?' VVIP':w.lv?' VIP':'')+' · '+f(w.amt)+'<br><span class="m">'+esc(w.ad)+'</span></span>'+bt('aw',w.id,'1','✓')+bt('aw',w.id,'','✕',1)+'</div>').join('')+'</div>';
-if(has('us')){const U=AD.usr;x+='<div class="c"><b>Users</b><div data-f><input name="s" placeholder="Telegram ID or @username"><button class="b" data-a="au">Find</button></div>'+(U?'<p>'+esc(U.n)+' · '+U.id+(U.un?' · @'+esc(U.un):'')+'<br>Balance '+f(U.b)+(U.bn?' · BLOCKED':'')+(U.isa?' · ADMIN':'')+'</p><div data-f><input name="amt" type="number" step="any" placeholder="+/- SPC"><div class="g"><button class="b" data-a="ag" data-id="'+U.id+'">Adjust</button><button class="b x" data-a="ab" data-id="'+U.id+'" data-on="'+(U.bn?'':'1')+'">'+(U.bn?'Unblock':'Block')+'</button></div></div>':'')+'</div>'}
+if(has('us')){const U=AD.usr;x+='<div class="c"><b>Users</b><div data-f><input name="s" placeholder="Telegram ID or @username"><button class="b" data-a="au">Find</button></div>'+(U?'<p>'+esc(U.n)+' · '+U.id+(U.un?' · @'+esc(U.un):'')+'<br>Balance '+f(U.b)+(U.bn?' · BLOCKED':'')+(U.isa?' · ADMIN':'')+'</p><div data-f><input name="amt" type="number" step="any" placeholder="+ gift / - deduct SPC"><input name="lb" list="lbl" maxlength="30" placeholder="Gift label (Creator Reward, Top 10...)"><datalist id="lbl"><option value="Creator Reward"><option value="Activity Gift"><option value="Top 10"></datalist><div class="g"><button class="b" data-a="ag" data-id="'+U.id+'">Adjust</button><button class="b x" data-a="ab" data-id="'+U.id+'" data-on="'+(U.bn?'':'1')+'">'+(U.bn?'Unblock':'Block')+'</button></div></div>':'')+'</div>'}
 if(has('st')){x+='<div class="c" data-f><b>📈 Post market entry</b><p class="m">Profit pays coins to every holder instantly (stocks x amount). Loss is shown on the dashboard only.</p><select name="kd"><option value="p">Profit (pays coins)</option><option value="l">Loss (display only)</option></select><input name="pps" type="number" step="any" placeholder="Coins per stock"><input name="nt" placeholder="Note (visible to everyone)"><button class="b gd" data-a="sp">Post entry</button></div>';
 x+='<div class="c"><b>Stock USDT orders</b>'+AD.so.map(o=>'<div class="r"><span>'+esc(o.nm||o.u)+' · ID '+o.u+'<br><span class="m">'+o.q+' stock · '+fm(o.tot)+' USDT<br>'+esc(o.tx)+'</span></span><button class="b" data-a="so" data-no="'+esc(o.no)+'" data-ok="1">✓</button><button class="b x" data-a="so" data-no="'+esc(o.no)+'" data-ok="">✕</button></div>').join('')+'</div>';
 x+='<div class="c" data-f><b>Stock rules (visible to all)</b><textarea name="str" rows="7" placeholder="Write the stock rules here...">'+esc(AD.c.str)+'</textarea><button class="b" data-a="sq">Save rules</button></div>'}
+if(has('rw'))x+=rewardsadm();
 if(has('rt'))x+=ratesupply();
 if(has('cm'))x+=comm();
 if(has('lg'))x+=errlog();
@@ -949,14 +1013,16 @@ $('app').innerHTML='<header><div class="av">'+esc(Array.from(u.n||'?')[0])+'</di
 const IC={f:'<path d="M12 21v-9M12 12c-4 0-6-2-6-6 4 0 6 2 6 6zM12 14c0-4 2-6 6-6 0 4-2 6-6 6z"/>',h:'<path d="M13 2L4 14h7l-1 8 9-12h-7z"/>',t:'<circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/>',r:'<circle cx="10" cy="8" r="3.5"/><path d="M3.5 20v-1a4 4 0 014-4h5a4 4 0 014 4v1"/>',b:'<path d="M5 20V10M12 20V4M19 20v-7"/>',w:'<rect x="3" y="6" width="18" height="13" rx="3"/><path d="M16 13h2"/>',a:'<circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/>'};
 const tb=[['h','Home'],['t','Tasks'],['f','Farm'],['r','Refer'],['b','Ranking'],['w','Wallet']];
 $('nav').innerHTML=tb.map(t=>'<a data-a="tab" data-t="'+t[0]+'" class="'+(tab==t[0]?'on':'')+'"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">'+IC[t[0]]+'</svg>'+t[1]+'</a>').join('');
-const bl=$('bal');if(bl){if(pb!==null&&pb!=u.b){const a0=+pb,t0=performance.now(),to=+u.b,st=t=>{const k=Math.min(1,(t-t0)/600);bl.textContent=f(a0+(to-a0)*k);if(k<1)requestAnimationFrame(st)};requestAnimationFrame(st)}pb=u.b}ld()}
+const bl=$('bal');if(bl){if(pb!==null&&pb!=u.b){const a0=+pb,t0=performance.now(),to=+u.b,st=t=>{const k=Math.min(1,(t-t0)/600);bl.textContent=f(a0+(to-a0)*k);if(k<1)requestAnimationFrame(st)};requestAnimationFrame(st)}pb=u.b}ld();popup()}
 document.onclick=e=>{const b=e.target.closest('[data-a]');if(!b)return;try{T.HapticFeedback.impactOccurred('light')}catch(e){}const d=Object.assign({},b.dataset),a=d.a,F=b.closest('[data-f]');
 if(F)F.querySelectorAll('input,select,textarea').forEach(i=>{if(i.name)d[i.name]=i.value});
+if(a=='dv'&&d.stop!='1'){d.s=new Date(d.s).getTime()||0;d.e=new Date(d.e).getTime()||0}
 if(a=='aa'&&F)d.rl=[].slice.call(F.querySelectorAll('input[type=checkbox]:checked')).map(i=>i.value).join(',');
 if(a=='tab'){tab=d.t;render();const p=$('app');p.classList.remove('fi');void p.offsetWidth;p.classList.add('fi')}
 else if(a=='v'){const l=d.url;if(l.indexOf('t.me/')>-1)T.openTelegramLink(l);else T.openLink(l);act('ts',{t:d.t})}
 else if(a=='sv'){try{T.shareToStory(S.c.sm,{text:'Mine Spider Coin with me!',widget_link:{url:'https://t.me/'+S.bot+'?startapp=r'+S.u.id,name:'Spider Coin'}})}catch(e){}act('ss')}
 else if(a=='lg'||a=='lc'||a=='lt'){(a=='lt'?api('lt').then(function(){return api('lg')}):api(a)).then(function(r){if(r&&r.lg){LG=r.lg;render()}})}
+else if(a=='pl'){PPX[d.k]=1;popup()}
 else if(a=='cp'){try{navigator.clipboard.writeText(d.l).then(()=>toast('Copied ✓'),()=>cpf(d.l))}catch(e){cpf(d.l)}}
 else if(a=='sh')T.openTelegramLink('https://t.me/share/url?url='+encodeURIComponent(d.l)+'&text='+encodeURIComponent('Mine Spider Coin with me!'));
 else if(a=='ol')T.openTelegramLink(d.l);else if(a=='ws'){wsub=d.s;render()}else if(a=='fs'){fsub=d.s;render()}else if(a=='inv'){const url=location.origin+'/invoice?i='+encodeURIComponent(T.initData)+'&n='+encodeURIComponent(d.no);try{if(T.downloadFile&&T.isVersionAtLeast&&T.isVersionAtLeast('8.0'))T.downloadFile({url:url,file_name:d.no+'.pdf'});else T.openLink(url)}catch(e){T.openLink(url)}}else if(a=='sp'){const go=()=>act('sp',d);if(T.showConfirm)T.showConfirm('Post this entry? A profit entry pays coins to all stock holders immediately and cannot be undone.',ok=>{if(ok)go()});else go()}else act(a,d)};
