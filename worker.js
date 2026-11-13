@@ -8,9 +8,10 @@
 // Version 1.3: server-enforced 30s task timer, custom task button labels, Official Channel check for send and withdraw
 // Version 1.5: gift box (admin gifts with a label), welcome bonus popup, Double Reward event, 7-day check-in
 // Version 1.4: referral Pending/Successful, new startapp link, referral boost, 3-level commission (pool), Spider Web
+// Version 1.6: bot notifications, live counters, admin stats and member details, member number, last active
 // =====================================================================
 const MAIN_ADMIN = "8825348718", ADMIN_USER = "Spider_Incom", BOT_USER = "SPC_Wallet_bot";
-const FOREVER = 4102444800000, SV = "11", APP_VERSION = "1.5";
+const FOREVER = 4102444800000, SV = "12", APP_VERSION = "1.6";
 // Supply: 10 billion SPC in total. The community (all user balances) may hold at most 50%.
 const TOTAL_SUPPLY = 1e10, CAP_PCT = 50, COMMUNITY_CAP = TOTAL_SUPPLY * CAP_PCT / 100;
 const CAPMSG = "The reward limit for the community supply is reached. Please try again later.";
@@ -49,9 +50,10 @@ async function refCheck(db, env, c, id) {
     if (!(a && (a.ms > 0 || a.m > 0 || a.t > 0))) return;
     if (chs(c.ch).length && await chanCheck(env, id, c)) return;
     const rw = Number(c.refrw) || 0, g = "EXISTS(SELECT 1 FROM refs WHERE referred=? AND st='p')";
-    await db.batch([
+    const rb = await db.batch([
       db.prepare("UPDATE u SET p=ROUND(p+?,6),rc=rc+1 WHERE id=? AND " + g).bind(rw, rf.referrer, id),
       db.prepare("UPDATE refs SET st='s',rw=?,ts=? WHERE referred=? AND st='p'").bind(rw, Date.now(), id)]);
+    if (rb[1].meta.changes == 1) await notify(env, rf.referrer, "\u{1F91D} Your referral is now Successful! Your reward of " + nf(rw) + " SPC is waiting in the Refer tab.");
   } catch (e) { await logErr(db, "server", "refcheck", id, e) }
 }
 
@@ -71,16 +73,47 @@ async function payCommission(db, c, buyer, ref, kd, base, unit) {
       if (await capOk(db, amt)) {
         const g = "NOT EXISTS(SELECT 1 FROM cm WHERE ref=? AND lvl=?) AND (SELECT b FROM cp WHERE id=1)>=?";
         const own = "EXISTS(SELECT 1 FROM cm WHERE ref=? AND lvl=? AND st='p' AND ts=?)";
-        await db.batch([
+        const cr = await db.batch([
           db.prepare("INSERT INTO cm(ref,lvl,u,src,kd,bp,base,ut,amt,st,ts) SELECT ?,?,?,?,?,?,?,?,?,'p',? WHERE " + g).bind(...row, ref, lvl, amt),
           db.prepare("INSERT INTO h(u,k,amt,ts,n,rt) SELECT ?,'commission',?,?,?,? WHERE " + own).bind(cur, amt, now, "Level " + lvl, String(c.urt), ref, lvl, now),
           db.prepare("UPDATE u SET b=ROUND(b+?,6) WHERE id=? AND " + own).bind(amt, cur, ref, lvl, now),
           db.prepare("UPDATE cp SET b=ROUND(b-?,6) WHERE id=1 AND " + own).bind(amt, ref, lvl, now)]);
+        if (cr[2].meta.changes == 1) await notify(null, cur, "\u{1F4B8} Team commission: +" + nf(amt) + " SPC (Level " + lvl + ") from a " + (kd == "stock" ? "stock" : "VIP/VVIP") + " purchase.");
       }
       // not paid (pool empty or supply cap): keep a record so the admin can see it
       await db.prepare("INSERT OR IGNORE INTO cm(ref,lvl,u,src,kd,bp,base,ut,amt,st,ts) VALUES(?,?,?,?,?,?,?,?,?,'u',?)").bind(...row).run();
     }
   } catch (e) { await logErr(db, "server", "commission", buyer, e) }
+}
+
+// ---------------------------------------------------------------- bot notifications (sent only after the database action worked)
+let CTX = null, GENV = null, ORIGIN = "", LCN = { t: 0, v: null };
+const nf = n => Number(n).toLocaleString("en-US", { maximumFractionDigits: 6 });
+async function notify(env, uid, text) {
+  try {
+    env = env || GENV; if (!env || !uid) return;
+    const kb = ORIGIN ? { text: "\u{1F578} Open App", web_app: { url: ORIGIN } } : { text: "\u{1F578} Open App", url: "https://t.me/" + BOT_USER + "?startapp" };
+    const p = tg(env, "sendMessage", { chat_id: uid, text, reply_markup: { inline_keyboard: [[kb]] } });
+    if (CTX) { try { CTX.waitUntil(p); return } catch (e) { } }
+    await p;
+  } catch (e) { }
+}
+
+// ---------------------------------------------------------------- live counters for the Home page (cached for 5 minutes)
+async function liveCounters(db) {
+  const n = Date.now();
+  if (LCN.v && n - LCN.t < 3e5) return LCN.v;
+  try {
+    const d0 = new Date(n); d0.setUTCHours(0, 0, 0, 0);
+    const a = await db.prepare("SELECT COUNT(*) m,COALESCE(SUM(ts>=?),0) j FROM u").bind(d0.getTime()).first();
+    const sv = await db.prepare("SELECT k,v FROM s WHERE k IN ('_lci','_lct')").all();
+    let last = 0, tot = 0; for (const r of sv.results) { if (r.k == "_lci") last = Number(r.v) || 0; else tot = Number(r.v) || 0 }
+    const h = await db.prepare("SELECT (SELECT COALESCE(MAX(id),0) FROM h) mx,COALESCE(SUM(CASE WHEN amt>0 AND k IN ('mc','task','referral','bonus','checkin','gift','story','farm','commission') THEN amt END),0) t FROM h WHERE id>?").bind(last).first();
+    tot = Math.round((tot + Number(h.t || 0)) * 1e6) / 1e6;
+    await db.batch([db.prepare("INSERT OR REPLACE INTO s(k,v) VALUES('_lci',?)").bind(String(Math.max(last, Number(h.mx) || 0))), db.prepare("INSERT OR REPLACE INTO s(k,v) VALUES('_lct',?)").bind(String(tot))]);
+    LCN = { t: n, v: { m: Number(a.m) || 0, j: Number(a.j) || 0, c: tot } };
+  } catch (e) { await logErr(db, "server", "counters", 0, e); LCN.t = n - 24e4; if (!LCN.v) LCN.v = { m: 0, j: 0, c: 0 } }
+  return LCN.v;
 }
 
 // ---------------------------------------------------------------- community supply cap
@@ -139,6 +172,8 @@ async function init(db) {
     await addCols("u", [["wc", "INTEGER DEFAULT 0"], ["cs", "INTEGER DEFAULT 0"], ["cd", "TEXT DEFAULT ''"]]);
     if (!hadWc) await db.prepare("UPDATE u SET wc=2").run(); // users who already exist do not get the new-user welcome bonus
     await addCols("t", [["bl", "TEXT DEFAULT ''"]]);
+    await addCols("u", [["la", "INTEGER DEFAULT 0"], ["mn", "INTEGER DEFAULT 0"]]);
+    await db.prepare("UPDATE u SET mn=(SELECT COUNT(*) FROM u u2 WHERE u2.ts<u.ts OR (u2.ts=u.ts AND u2.id<=u.id)) WHERE mn=0").run();
     await addCols("refs", [["st", "TEXT DEFAULT 's'"]]);
     await db.prepare("INSERT OR IGNORE INTO refs(referred,referrer,rw,ts,st) SELECT id,r,0,0,'p' FROM u WHERE r>0 AND c=0").run();
     await addCols("admins", [["rl", "TEXT DEFAULT 'cfg,tk,us,wd,od,st'"]]);
@@ -203,9 +238,10 @@ async function chanCheck(env, id, c) {
 
 // ---------------------------------------------------------------- router
 export default {
-  async fetch(rq, env) {
+  async fetch(rq, env, ctx) {
+    CTX = ctx || null; GENV = env;
     try {
-      const U = new URL(rq.url), db = env.DB;
+      const U = new URL(rq.url), db = env.DB; ORIGIN = U.origin;
       if (U.pathname == "/webhook" && rq.method == "POST") {
         if (!env.WEBHOOK_SECRET || rq.headers.get("x-telegram-bot-api-secret-token") !== env.WEBHOOK_SECRET) return new Response("forbidden", { status: 403 });
         let up; try { up = await rq.json() } catch (e) { return new Response("ok") }
@@ -258,12 +294,13 @@ async function run(rq, env) {
   const sp = IP.get("start_param") || "";
   const rr = async () => { const r = /^r[0-9]{1,15}$/.test(sp) ? +sp.slice(1) : 0; return r && r != id && await Q("SELECT id FROM u WHERE id=?", r) ? r : 0 };
   let u = await Q(SEL, id);
-  if (!u) { await X("INSERT OR IGNORE INTO u(id,n,r,ts,rg) VALUES(?,?,?,?,1)", id, nm, await rr(), now); u = await Q(SEL, id); if (u && u.r) await X("INSERT OR IGNORE INTO refs(referred,referrer,rw,ts,st) VALUES(?,?,0,?,'p')", id, u.r, now) }
+  if (!u) { await X("INSERT OR IGNORE INTO u(id,n,r,ts,rg) VALUES(?,?,?,?,1)", id, nm, await rr(), now); await X("UPDATE u SET mn=(SELECT COALESCE(MAX(mn),0)+1 FROM u) WHERE id=? AND mn=0", id); u = await Q(SEL, id); if (u && u.r) await X("INSERT OR IGNORE INTO refs(referred,referrer,rw,ts,st) VALUES(?,?,0,?,'p')", id, u.r, now) }
   else if (!u.rg && !u.r) { const r0 = await rr(); if (r0) { await X("UPDATE u SET r=? WHERE id=?", r0, id); u.r = r0; await X("INSERT OR IGNORE INTO refs(referred,referrer,rw,ts,st) VALUES(?,?,0,?,'p')", id, r0, now) } }
   if ((u.un || "") !== un || u.n !== nm || !u.rg) {
     const st = []; if (un) st.push(P("UPDATE u SET un='' WHERE un=? AND id!=?", un, id));
     st.push(P("UPDATE u SET un=?,n=?,rg=1 WHERE id=?", un, nm, id)); await db.batch(st); u.un = un; u.n = nm; u.rg = 1;
   }
+  if (!(u.la > now - 6e5)) { await X("UPDATE u SET la=? WHERE id=?", now, id); u.la = now }
   const adm = String(id) == MAIN || u.isa == 1;
   const isMain = String(id) == MAIN, roles = new Set(String(u.arl || "").split(",")), can = r => isMain || (r !== "main" && roles.has(r));
   if (u.bn && !adm) return E("Your account is blocked");
@@ -280,6 +317,41 @@ async function run(rq, env) {
     });
   }
   if (a == "cm") { const has = chs(c.ch).length > 0; return J({ m: has ? !(await chanCheck(env, id, c)) : null }) }
+  if (a == "sa" || a == "ud") {
+    if (!adm || !can("sa")) return E("You do not have permission for this action");
+    if (a == "sa") {
+      const r = await db.batch([
+        P("SELECT COUNT(*) n,COALESCE(SUM(la>=?),0) d1,COALESCE(SUM(la>=?),0) d7,COALESCE(SUM(la>=?),0) d30,COALESCE(SUM(vl=1 AND vx>?),0) v1,COALESCE(SUM(vl=2 AND vx>?),0) v2,COALESCE(SUM(b),0) b FROM u", now - 864e5, now - 7 * 864e5, now - 30 * 864e5, now, now),
+        P("SELECT COUNT(*) n,COALESCE(SUM(st='p'),0) p,COALESCE(SUM(st='s'),0) s,COALESCE(SUM(CASE WHEN st='s' THEN rw END),0) rw FROM refs"),
+        P("SELECT COALESCE(SUM(CASE WHEN st='p' THEN amt END),0) paid,COALESCE(SUM(st='u'),0) unpaid FROM cm"),
+        P("SELECT COUNT(*) n FROM stk WHERE n>0")]);
+      const x = r[0].results[0], f = r[1].results[0], m = r[2].results[0];
+      return J({ n: x.n, vis: x.n, d1: x.d1, d7: x.d7, d30: x.d30, inact: x.n - x.d7, vip: x.v1, vvip: x.v2, norm: x.n - x.v1 - x.v2, held: x.b, holders: r[3].results[0].n, rn: f.n, rp: f.p, rs: f.s, rrw: f.rw, cpaid: m.paid, cun: m.unpaid });
+    }
+    const qid = Math.floor(+q.id) || 0;
+    if (qid) {
+      const U1 = await Q("SELECT id,n,un,b,vl,vx,la,ts,mn FROM u WHERE id=?", qid); if (!U1) return E("User not found");
+      const r = await db.batch([
+        P("SELECT COUNT(*) n,COALESCE(SUM(st='p'),0) p,COALESCE(SUM(st='s'),0) s,COALESCE(SUM(CASE WHEN st='s' THEN rw END),0) rw FROM refs WHERE referrer=?", qid),
+        P("SELECT COALESCE(SUM(amt),0) a FROM cm WHERE u=? AND st='p'", qid),
+        P("SELECT COUNT(*) n FROM d WHERE u=? AND c=1", qid),
+        P("SELECT y,d,amt FROM ci WHERE u=? ORDER BY ts DESC LIMIT 10", qid),
+        P("SELECT COALESCE((SELECT n FROM stk WHERE u=?),0) n", qid),
+        P("SELECT no,q,tot,cu,pm,st,ts FROM inv WHERE u=? ORDER BY ts DESC LIMIT 10", qid),
+        P("SELECT k,amt,ts,n,rt FROM h WHERE u=? ORDER BY id DESC LIMIT 15", qid)]);
+      return J({ d: { u: U1, rf: r[0].results[0], cm: r[1].results[0].a, tk: r[2].results[0].n, ci: r[3].results, st: r[4].results[0].n, pu: r[5].results, hs: r[6].results } });
+    }
+    const like = z => z.replace(/[!%_]/g, ch => "!" + ch), s0 = String(q.q || "").trim().slice(0, 40).replace(/^@/, ""), mem = String(q.m || ""), bmin = Math.max(0, Number(q.bmin) || 0);
+    const w = ["1=1"], pr = [];
+    if (s0) {
+      if (/^[0-9]{3,15}$/.test(s0)) { w.push("(id=? OR un LIKE ? ESCAPE '!' OR n LIKE ? ESCAPE '!')"); pr.push(+s0, "%" + like(s0) + "%", "%" + like(s0) + "%") }
+      else { w.push("(un LIKE ? ESCAPE '!' OR n LIKE ? ESCAPE '!')"); pr.push("%" + like(s0.toLowerCase()) + "%", "%" + like(s0) + "%") }
+    }
+    if (mem == "n") { w.push("NOT (vl>0 AND vx>?)"); pr.push(now) } else if (mem == "v") { w.push("(vl=1 AND vx>?)"); pr.push(now) } else if (mem == "w") { w.push("(vl=2 AND vx>?)"); pr.push(now) }
+    if (bmin > 0) { w.push("b>=?"); pr.push(bmin) }
+    const rs = await P("SELECT id,n,un,b,vl,vx,la,ts,mn FROM u WHERE " + w.join(" AND ") + " ORDER BY ts DESC LIMIT 20", ...pr).all();
+    return J({ us: rs.results });
+  }
   if (a == "lg" || a == "lc" || a == "lt") {
     if (!adm || !can("lg")) return E("You do not have permission for this action");
     if (a == "lt") throw new Error("Test error created by the admin button");
@@ -397,7 +469,7 @@ async function run(rq, env) {
         else {
           const g = "EXISTS(SELECT 1 FROM o WHERE id=? AND st='p')";
           const rv = await db.batch([P("UPDATE u SET vl=MAX(CASE WHEN vx>? THEN vl ELSE 0 END,?),vx=? WHERE id=? AND " + g, now, o.k == "v2" ? 2 : 1, FOREVER, o.u, o.id), P("UPDATE o SET st='a' WHERE id=? AND st='p'", o.id)]);
-          if (rv[1].meta.changes == 1) await payCommission(db, c, o.u, "o:" + o.id, "vip", N(o.k == "v2" ? "vp2" : "vp1"), "usdt");
+          if (rv[1].meta.changes == 1) { await payCommission(db, c, o.u, "o:" + o.id, "vip", N(o.k == "v2" ? "vp2" : "vp1"), "usdt"); await notify(env, o.u, "\u{1F451} Your payment was approved. Your " + (o.k == "v2" ? "VVIP" : "VIP") + " badge is now active.") }
         }
         break;
       }
@@ -405,7 +477,7 @@ async function run(rq, env) {
         if (!(tid > 0)) return E("Enter a numeric Telegram ID");
         if (String(tid) == MAIN) return E("Main admin cannot be changed");
         if (ON) {
-          const rl = [...new Set(String(q.rl || "").split(",").map(x => x.trim()).filter(x => ["cfg", "tk", "us", "wd", "od", "st", "lg", "rt", "cm", "rw"].includes(x)))];
+          const rl = [...new Set(String(q.rl || "").split(",").map(x => x.trim()).filter(x => ["cfg", "tk", "us", "wd", "od", "st", "lg", "sa", "rt", "cm", "rw"].includes(x)))];
           if (!rl.length) return E("Choose at least one role");
           await X("INSERT INTO admins(id,by,ts,rl) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET rl=excluded.rl", tid, id, now, rl.join(","));
         } else await X("DELETE FROM admins WHERE id=?", tid);
@@ -450,7 +522,7 @@ async function run(rq, env) {
       case "ag": {
         const t = await find(String(tid)); if (!t) return E("User not found");
         const m = Math.round(Number(q.amt) * 1e6) / 1e6; if (!Number.isFinite(m) || m == 0 || Math.abs(m) > 1e9) return E("Enter a valid amount");
-        if (m > 0) { if (!(await capOk(db, m))) return E(CAPMSG); await X("INSERT INTO gf(u,amt,lb,ts) VALUES(?,?,?,?)", t.id, m, String(q.lb || "").trim().slice(0, 30) || "Admin Gift", now); usr = await find(String(t.id)); break }
+        if (m > 0) { if (!(await capOk(db, m))) return E(CAPMSG); const lbl = String(q.lb || "").trim().slice(0, 30) || "Admin Gift"; await X("INSERT INTO gf(u,amt,lb,ts) VALUES(?,?,?,?)", t.id, m, lbl, now); await notify(env, t.id, "\u{1F381} You received a reward: " + lbl + " (+" + nf(m) + " SPC). Open the app and tap Claim!"); usr = await find(String(t.id)); break }
         const g = m > 0 ? "EXISTS(SELECT 1 FROM u WHERE id=?)" : "(SELECT b FROM u WHERE id=?)>=?", gb = m > 0 ? [t.id] : [t.id, -m];
         const r = await db.batch([HS(t.id, "admin", m, "Admin", g, gb), P("UPDATE u SET b=ROUND(b+?,6) WHERE id=? AND " + g, m, t.id, ...gb)]);
         if (r[1].meta.changes != 1) return E("User balance is too low"); usr = await find(String(t.id)); break;
@@ -494,6 +566,7 @@ async function run(rq, env) {
       if (t.o) st.push(P("UPDATE t SET l=l-1,st=IIF(l<=1,'x','a') WHERE id=? AND " + g, t.id, ...gb));
       st.push(P("UPDATE d SET c=1 WHERE u=? AND t=? AND y=? AND c=0", ...gb));
       const r = await db.batch(st); if (r[1].meta.changes != 1) return E("Already claimed");
+      await notify(env, id, "\u2705 Task reward: +" + nf(rwd) + " SPC was added to your wallet.");
       await refCheck(db, env, c, id);
       break;
     }
@@ -514,7 +587,8 @@ async function run(rq, env) {
       if (!(await capOk(db, p))) return E(CAPMSG);
       const g = "(SELECT p FROM u WHERE id=?)>=?";
       const r = await db.batch([HS(id, "referral", p, "", g, [id, p]), P("UPDATE u SET b=ROUND(b+?,6),p=ROUND(p-?,6) WHERE id=? AND " + g, p, p, id, id, p)]);
-      if (r[1].meta.changes != 1) return E("Try again"); break;
+      if (r[1].meta.changes != 1) return E("Try again");
+      await notify(env, id, "\u{1F4B0} Referral reward: +" + nf(p) + " SPC was added to your wallet."); break;
     }
     case "pr": {
       const pay = q.pay, pl = PL[pay == "f" ? 2 : +q.p], url = String(q.url || "").trim();
@@ -558,7 +632,9 @@ async function run(rq, env) {
       const g = "(SELECT b FROM u WHERE id=?)>=?", gb = [id, m];
       const r = await db.batch([HS(id, "sent", -m, v.un ? "@" + v.un : "ID " + v.id, g, gb), HS(v.id, "received", m, un ? "@" + un : "ID " + id, g, gb),
         P("UPDATE u SET b=CASE WHEN id=? THEN ROUND(b-?,6) ELSE ROUND(b+?,6) END WHERE id IN (?,?) AND " + g, id, m, m, id, v.id, ...gb)]);
-      if (r[2].meta.changes != 2) return E("Not enough coins"); break;
+      if (r[2].meta.changes != 2) return E("Not enough coins");
+      await notify(env, id, "\u{1F4E4} You sent " + nf(m) + " SPC to " + (v.un ? "@" + v.un : "ID " + v.id) + ".");
+      await notify(env, v.id, "\u{1F4E5} You received " + nf(m) + " SPC from " + (un ? "@" + un : nm) + "."); break;
     }
     case "bv": {
       const t2 = q.k == "v2";
@@ -567,7 +643,8 @@ async function run(rq, env) {
       const k = N(t2 ? "vc2" : "vc"), g = "(SELECT b FROM u WHERE id=?)>=?", gb = [id, k];
       const r = await db.batch([HS(id, "vip", -k, t2 ? "VVIP" : "VIP", g, gb), P("UPDATE u SET b=ROUND(b-?,6),vl=?,vx=? WHERE id=? AND " + g, k, t2 ? 2 : 1, FOREVER, id, ...gb)]);
       if (r[1].meta.changes != 1) return E("Not enough coins");
-      await payCommission(db, c, id, "bv:" + id + ":" + (t2 ? 2 : 1), "vip", k, "spc"); break;
+      await payCommission(db, c, id, "bv:" + id + ":" + (t2 ? 2 : 1), "vip", k, "spc");
+      await notify(env, id, "\u{1F451} Your " + (t2 ? "VVIP" : "VIP") + " badge is now active. Thank you!"); break;
     }
     case "vo": {
       const k = q.k, tx = String(q.tx || "").trim().toLowerCase();
@@ -617,7 +694,8 @@ async function run(rq, env) {
       const r = await db.batch([P(ins + g, no, id, qn, pr, "SPC", tot, "coin", "", "a", now, nm, un, lv, id, tot, qn, tt), HS(id, "stock", -tot, qn + " stock", mk, [no]), bump, hold,
         P("UPDATE stk SET n=n+? WHERE u=? AND " + mk, qn, id, no), P("INSERT INTO stl(u,k,q,n,ts) SELECT ?,?,?,?,? WHERE " + mk, id, "buy", qn, "SPC", now, no), P("UPDATE u SET b=ROUND(b-?,6) WHERE id=? AND " + mk, tot, id, no)]);
       if (r[0].meta.changes != 1) return E("Not enough coins or stock sold out");
-      await payCommission(db, c, id, "inv:" + no, "stock", tot, "spc"); break;
+      await payCommission(db, c, id, "inv:" + no, "stock", tot, "spc");
+      await notify(env, id, "\u{1F4C8} Stock purchase done: " + qn + " stock for " + nf(tot) + " SPC. Your invoice is in the Farm tab."); break;
     }
     case "xs": {
       const qn = Math.floor(+q.q); if (!(qn >= 1 && qn <= 2000000)) return E("Enter a valid stock quantity");
@@ -661,7 +739,8 @@ async function run(rq, env) {
       if (!(await capOk(db, amt))) return E(CAPMSG);
       const g = "(SELECT cd FROM u WHERE id=?)=?", gb = [id, u.cd || ""];
       const r = await db.batch([HS(id, "checkin", amt, "Day " + day, g, gb), P("INSERT OR IGNORE INTO ci(u,y,d,amt,ts) SELECT ?,?,?,?,? WHERE " + g, id, today, day, amt, now, ...gb), P("UPDATE u SET b=ROUND(b+?,6),cs=?,cd=? WHERE id=? AND " + g, amt, day, today, id, ...gb)]);
-      if (r[2].meta.changes != 1) return E("You already checked in today"); break;
+      if (r[2].meta.changes != 1) return E("You already checked in today");
+      await notify(env, id, "\u{1F5D3} Daily check-in Day " + day + ": +" + nf(amt) + " SPC was added to your wallet."); break;
     }
     default: return E("Unknown action");
   }
@@ -674,7 +753,7 @@ async function run(rq, env) {
   u = r[0].results[0]; const l2 = u.vx > Date.now() ? u.vl : 0;
   const yst2 = new Date(Date.now() - 864e5).toISOString().slice(0, 10), alive = u.cd == today || u.cd == yst2, skn = alive ? (+u.cs || 0) : 0, dn = u.cd == today, cnt = !dn && skn >= 7 ? 0 : skn;
   const ck = { done: dn, n: cnt, nd: dn ? skn : cnt + 1, rw: [1, 2, 3, 4, 5, 6, 7].map(i => N("ci" + i)) };
-  return J({ u: { id: u.id, n: u.n, un: u.un, b: u.b, p: u.p, c: u.c, r: u.r, sl: u.sl, ss: u.ss, mst: u.mst }, c, tk: r[1].results, rf: r[2].results[0].s, rfs: r[2].results[0], sk: r[3].results[0] || { n: 0, fr: 0 }, wb: { n: r[4].results[0].n, t: r[4].results[0].t, on: u.ts > 0 && Date.now() - u.ts < 6048e5, end: u.ts + 6048e5, rw: N("wbr"), need: N("wbf") }, bot: BOT_USER, now: Date.now(), adm, lv: l2, er: (l2 ? N("vr") : N("rate")) * (1 + Math.min(100, 5 * (+u.rc || 0)) / 100), bst: Math.min(100, 5 * (+u.rc || 0)), gf: r[5].results, wn: u.wc === 0 ? N("wbn") : 0, ck });
+  return J({ lc: await liveCounters(db), u: { id: u.id, n: u.n, un: u.un, b: u.b, p: u.p, c: u.c, r: u.r, sl: u.sl, ss: u.ss, mst: u.mst, mn: u.mn }, c, tk: r[1].results, rf: r[2].results[0].s, rfs: r[2].results[0], sk: r[3].results[0] || { n: 0, fr: 0 }, wb: { n: r[4].results[0].n, t: r[4].results[0].t, on: u.ts > 0 && Date.now() - u.ts < 6048e5, end: u.ts + 6048e5, rw: N("wbr"), need: N("wbf") }, bot: BOT_USER, now: Date.now(), adm, lv: l2, er: (l2 ? N("vr") : N("rate")) * (1 + Math.min(100, 5 * (+u.rc || 0)) / 100), bst: Math.min(100, 5 * (+u.rc || 0)), gf: r[5].results, wn: u.wc === 0 ? N("wbn") : 0, ck });
 }
 
 // ---------------------------------------------------------------- invoice PDF (no external libraries)
@@ -920,7 +999,36 @@ function ux(n,rt){rt=String(rt||S.c.urt||'');const m=rt.match(new RegExp('^([0-9
 function uxs(n,rt){const x=ux(n,rt);return x?'\u2248 '+x+' USDT':''}
 function rateline(){return '<div class="m" style="text-align:center;margin:-4px 0 10px">1 SPC = <b>'+ux(1)+'</b> USDT</div>'}
 function ratecard(){const x=[1,100,1000,10000].map(n=>'<span>'+fk(n)+' SPC = <b>'+ux(n)+'</b> USDT</span>').join('');return '<div class="c"><b>SPC rate</b><div class="m" style="display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:6px">'+x+'</div></div>'}
-function homebal(){const u=S.u;return '<div class="c"><div class="r" style="padding:0"><span class="m">Your balance</span><b>'+fm(u.b)+' SPC</b></div><div class="m" style="text-align:right">'+uxs(u.b)+'</div></div>'+rateline()}
+function livec(){const l=S.lc;if(!l)return '';return '<div class="c"><b>Community</b><div class="stat3"><div><span>Members</span><b>'+fk(l.m)+'</b></div><div><span>Joined today</span><b>'+fk(l.j)+'</b></div><div><span>SPC claimed</span><b>'+fk(Math.round(l.c))+'</b></div></div></div>'}
+let ST=null,UL=null,UD=null;
+function mtype(v,x){return v>0&&x>Date.now()?(v==2?'VVIP':'VIP'):'Normal'}
+function memb(){
+const row=(a,b)=>'<div><span>'+a+'</span><b>'+b+'</b></div>';
+let h='<div class="c"><b>Stats and Members</b><p class="m">Active means the user opened the app in the last 7 days. Activity counting starts when this version is deployed.</p>';
+if(ST===null){h+='<button class="b" data-a="sa">Load stats</button>'}
+else{const s=ST;
+h+='<button class="b" data-a="sa">Refresh stats</button>'
++'<div class="stat3">'+row('Members',fk(s.n))+row('Unique visitors',fk(s.vis))+row('SPC held',fk(Math.round(s.held)))+'</div>'
++'<div class="stat3">'+row('Active 24h',fk(s.d1))+row('Active 7d',fk(s.d7))+row('Active 30d',fk(s.d30))+'</div>'
++'<div class="stat3">'+row('Active',fk(s.d7))+row('Inactive',fk(s.inact))+row('Stock holders',fk(s.holders))+'</div>'
++'<div class="stat3">'+row('Normal',fk(s.norm))+row('VIP',fk(s.vip))+row('VVIP',fk(s.vvip))+'</div>'
++'<div class="stat3">'+row('Referrals',fk(s.rn))+row('Pending',fk(s.rp))+row('Successful',fk(s.rs))+'</div>'
++'<div class="stat3">'+row('Referral rewards',fk(Math.round(s.rrw)))+row('Commissions paid',fk(Math.round(s.cpaid)))+row('Unpaid commissions',fk(s.cun))+'</div>'}
+h+='<div data-f style="margin-top:10px"><input name="q" placeholder="ID, @username or name"><select name="m"><option value="">All members</option><option value="n">Normal</option><option value="v">VIP</option><option value="w">VVIP</option></select><input name="bmin" inputmode="decimal" placeholder="Min balance (SPC)"><button class="b" data-a="ud">Search</button></div>';
+if(UD){const d=UD,u=d.u;
+h+='<div style="border-top:1px solid var(--ln);margin-top:8px;padding-top:8px"><button class="b" data-a="udx">Back to list</button>'
++'<p><b>'+esc(u.n)+'</b> \u00b7 '+mtype(u.vl,u.vx)+(u.mn?' \u00b7 #'+u.mn:'')+'</p>'
++'<div class="m">ID '+u.id+(u.un?' \u00b7 @'+esc(u.un):'')+'</div>'
++'<div class="m">Registered: '+new Date(u.ts).toLocaleString()+'</div><div class="m">Last active: '+(u.la?new Date(u.la).toLocaleString():'not tracked yet')+'</div>'
++'<div class="r"><span>Balance</span><b>'+fm(u.b)+' SPC</b></div><div class="m" style="text-align:right">'+uxs(u.b)+'</div>'
++'<div class="stat3">'+row('Referrals',d.rf.n)+row('Pending',d.rf.p)+row('Successful',d.rf.s)+'</div>'
++'<div class="r"><span>Referral earnings</span><b>'+fm(d.rf.rw)+' SPC</b></div><div class="r"><span>Commission earnings</span><b>'+fm(d.cm)+' SPC</b></div><div class="r"><span>Completed tasks</span><b>'+d.tk+'</b></div><div class="r"><span>Stock holdings</span><b>'+d.st+'</b></div>'
++'<b>Check-ins</b>'+(d.ci.length?d.ci.map(x=>'<div class="m">'+esc(x.y)+' \u00b7 Day '+x.d+' \u00b7 +'+fm(x.amt)+'</div>').join(''):'<div class="m">None</div>')
++'<b>Purchases</b>'+(d.pu.length?d.pu.map(x=>'<div class="m">'+new Date(x.ts).toLocaleDateString()+' \u00b7 '+x.q+' stock \u00b7 '+fm(x.tot)+' '+esc(x.cu)+' \u00b7 '+esc(x.pm)+' \u00b7 '+esc(x.st)+'</div>').join(''):'<div class="m">None</div>')
++'<b>Wallet history</b>'+(d.hs.length?d.hs.map(x=>'<div class="m">'+new Date(x.ts).toLocaleDateString()+' \u00b7 '+esc(x.k)+(x.n?' '+esc(x.n):'')+' \u00b7 '+(x.amt>0?'+':'')+f(x.amt)+'</div>').join(''):'<div class="m">None</div>')+'</div>'}
+else if(UL){h+=UL.length?UL.map(x=>'<div class="r" data-a="ud" data-id="'+x.id+'" style="cursor:pointer;border-bottom:1px solid var(--ln)"><span>'+esc(x.n)+(x.un?' \u00b7 @'+esc(x.un):'')+'<br><span class="m">'+mtype(x.vl,x.vx)+' \u00b7 ID '+x.id+'</span></span><b>'+fm(x.b)+'</b></div>').join(''):'<p class="m">No members found</p>'}
+return h+'</div>'}
+function homebal(){const u=S.u;return '<div class="c"><div class="r" style="padding:0"><span class="m">Your balance</span><b>'+fm(u.b)+' SPC</b></div><div class="m" style="text-align:right">'+uxs(u.b)+'</div></div>'+rateline()+livec()}
 function comm(){const x=AD.cmx||{pool:0,un:0,pn:0,pa:0,ua:0};
 return '<div class="c" data-f><b>Commission (paid in SPC from the pool)</b><p class="m">Percent of each stock or VIP/VVIP purchase made with USDT or SPC. Lifetime, 3 levels.</p><div class="g"><input name="cp1" inputmode="decimal" placeholder="Level 1 %" value="'+esc(AD.c.cp1)+'"><input name="cp2" inputmode="decimal" placeholder="Level 2 %" value="'+esc(AD.c.cp2)+'"><input name="cp3" inputmode="decimal" placeholder="Level 3 %" value="'+esc(AD.c.cp3)+'"></div><button class="b" data-a="ac">Save percentages</button></div>'
 +'<div class="c" data-f><b>Commission pool</b><div class="stat3"><div><span>Pool</span><b>'+fk(Math.round(x.pool))+'</b></div><div><span>Paid</span><b>'+fk(Math.round(x.pa))+'</b></div><div><span>Unpaid</span><b>'+fk(Math.round(x.ua))+'</b></div></div><p class="m">Unpaid = the pool was empty or the supply cap was full ('+x.un+' records). Paid records: '+x.pn+'.</p><input name="amt" type="number" step="any" placeholder="Add SPC to the pool (use - to remove)"><button class="b" data-a="cf">Update pool</button></div>'}
@@ -988,7 +1096,7 @@ h+='<div style="border-top:1px solid var(--ln);padding:8px 0;word-break:break-wo
 })}
 return h+'</div>'}
 function admin(){if(!AD||!AD.c){if(!AD){AD=1;act('al')}return '<p class="m">Loading…</p>'}
-const has=r=>AD.im||AD.rl.indexOf(r)>-1,RL=[['cfg','Settings'],['tk','Tasks'],['us','Users'],['wd','Withdrawals'],['od','Orders'],['st','Stock'],['lg','Error Logs'],['rt','Rates & Supply'],['rw','Gifts & Rewards'],['cm','Commission']];
+const has=r=>AD.im||AD.rl.indexOf(r)>-1,RL=[['cfg','Settings'],['tk','Tasks'],['us','Users'],['wd','Withdrawals'],['od','Orders'],['st','Stock'],['lg','Error Logs'],['sa','Stats & Members'],['rt','Rates & Supply'],['rw','Gifts & Rewards'],['cm','Commission']];
 const bt=(a,id,ok,t,x)=>'<button class="b'+(x?' x':'')+'" data-a="'+a+'" data-id="'+id+'" data-ok="'+ok+'">'+t+'</button>';
 const cks=sel=>RL.map(r=>'<label class="ck"><input type="checkbox" value="'+r[0]+'"'+(sel.indexOf(r[0])>-1?' checked':'')+'>'+r[1]+'</label>').join('');
 let x='<div class="c"><b>🛠 Admin</b> <span class="m">App v'+VER+' · Users: '+AD.n+' · '+(AD.im?'Main Admin':'Roles: '+AD.rl.join(', '))+'</span></div>';
@@ -1002,6 +1110,7 @@ if(has('st')){x+='<div class="c" data-f><b>📈 Post market entry</b><p class="m
 x+='<div class="c"><b>Stock USDT orders</b>'+AD.so.map(o=>'<div class="r"><span>'+esc(o.nm||o.u)+' · ID '+o.u+'<br><span class="m">'+o.q+' stock · '+fm(o.tot)+' USDT<br>'+esc(o.tx)+'</span></span><button class="b" data-a="so" data-no="'+esc(o.no)+'" data-ok="1">✓</button><button class="b x" data-a="so" data-no="'+esc(o.no)+'" data-ok="">✕</button></div>').join('')+'</div>';
 x+='<div class="c" data-f><b>Stock rules (visible to all)</b><textarea name="str" rows="7" placeholder="Write the stock rules here...">'+esc(AD.c.str)+'</textarea><button class="b" data-a="sq">Save rules</button></div>'}
 if(has('rw'))x+=rewardsadm();
+if(has('sa'))x+=memb();
 if(has('rt'))x+=ratesupply();
 if(has('cm'))x+=comm();
 if(has('lg'))x+=errlog();
@@ -1009,7 +1118,7 @@ if(AD.im){x+='<div class="c"><b>Stock holders sheet</b><p class="m">Name, numeri
 x+='<div class="c"><b>Admins and roles</b><div class="r"><span>'+AD.main+' · Main Admin (all roles)</span></div>'+AD.ad.filter(z=>String(z.id)!=String(AD.main)).map(z=>'<div data-f style="border-top:1px solid var(--ln);padding:8px 0"><div class="r" style="padding:0"><b>'+z.id+'</b><button class="b x" data-a="aa" data-id="'+z.id+'" data-on="">Remove</button></div>'+cks(String(z.rl||'').split(','))+'<button class="b" data-a="aa" data-id="'+z.id+'" data-on="1">Save roles</button></div>').join('')+'<div data-f style="border-top:1px solid var(--ln);padding-top:8px"><input name="id" type="number" placeholder="Telegram numeric ID">'+cks(['cfg','tk','us','wd','od','st'])+'<button class="b" data-a="aa" data-on="1">Add admin</button></div></div>'}
 return x}
 function render(){const u=S.u;
-$('app').innerHTML='<header><div class="av">'+esc(Array.from(u.n||'?')[0])+'</div><div class="tt"><b>'+esc(u.n)+bdg(S.lv,1)+'</b><span>ID '+u.id+(u.un?' · @'+esc(u.un):'')+'</span></div>'+(S.adm?'<div class="gr" data-a="tab" data-t="'+(tab=='a'?'h':'a')+'">'+(tab=='a'?CLOSE:GEAR)+'</div>':'')+'</header><div class="pg">'+({h:home,t:tasks,f:farm,r:refer,b:board,w:wallet,a:admin})[tab]()+'</div>';
+$('app').innerHTML='<header><div class="av">'+esc(Array.from(u.n||'?')[0])+'</div><div class="tt"><b>'+esc(u.n)+bdg(S.lv,1)+'</b><span>ID '+u.id+(u.un?' · @'+esc(u.un):'')+'</span>'+(u.mn?'<span style="color:var(--gd)">SPIDER Member #'+u.mn+(u.mn<=1000?' · Early Member':'')+'</span>':'')+'</div>'+(S.adm?'<div class="gr" data-a="tab" data-t="'+(tab=='a'?'h':'a')+'">'+(tab=='a'?CLOSE:GEAR)+'</div>':'')+'</header><div class="pg">'+({h:home,t:tasks,f:farm,r:refer,b:board,w:wallet,a:admin})[tab]()+'</div>';
 const IC={f:'<path d="M12 21v-9M12 12c-4 0-6-2-6-6 4 0 6 2 6 6zM12 14c0-4 2-6 6-6 0 4-2 6-6 6z"/>',h:'<path d="M13 2L4 14h7l-1 8 9-12h-7z"/>',t:'<circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/>',r:'<circle cx="10" cy="8" r="3.5"/><path d="M3.5 20v-1a4 4 0 014-4h5a4 4 0 014 4v1"/>',b:'<path d="M5 20V10M12 20V4M19 20v-7"/>',w:'<rect x="3" y="6" width="18" height="13" rx="3"/><path d="M16 13h2"/>',a:'<circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/>'};
 const tb=[['h','Home'],['t','Tasks'],['f','Farm'],['r','Refer'],['b','Ranking'],['w','Wallet']];
 $('nav').innerHTML=tb.map(t=>'<a data-a="tab" data-t="'+t[0]+'" class="'+(tab==t[0]?'on':'')+'"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">'+IC[t[0]]+'</svg>'+t[1]+'</a>').join('');
@@ -1021,6 +1130,9 @@ if(a=='aa'&&F)d.rl=[].slice.call(F.querySelectorAll('input[type=checkbox]:checke
 if(a=='tab'){tab=d.t;render();const p=$('app');p.classList.remove('fi');void p.offsetWidth;p.classList.add('fi')}
 else if(a=='v'){const l=d.url;if(l.indexOf('t.me/')>-1)T.openTelegramLink(l);else T.openLink(l);act('ts',{t:d.t})}
 else if(a=='sv'){try{T.shareToStory(S.c.sm,{text:'Mine Spider Coin with me!',widget_link:{url:'https://t.me/'+S.bot+'?startapp=r'+S.u.id,name:'Spider Coin'}})}catch(e){}act('ss')}
+else if(a=='sa'){api('sa').then(function(r){if(r){ST=r;render()}})}
+else if(a=='ud'){api('ud',d).then(function(r){if(!r)return;if(r.us){UL=r.us;UD=null}else if(r.d){UD=r.d}render()})}
+else if(a=='udx'){UD=null;render()}
 else if(a=='lg'||a=='lc'||a=='lt'){(a=='lt'?api('lt').then(function(){return api('lg')}):api(a)).then(function(r){if(r&&r.lg){LG=r.lg;render()}})}
 else if(a=='pl'){PPX[d.k]=1;popup()}
 else if(a=='cp'){try{navigator.clipboard.writeText(d.l).then(()=>toast('Copied ✓'),()=>cpf(d.l))}catch(e){cpf(d.l)}}
