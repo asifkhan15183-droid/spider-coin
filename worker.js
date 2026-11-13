@@ -9,18 +9,29 @@
 // Version 1.5: gift box (admin gifts with a label), welcome bonus popup, Double Reward event, 7-day check-in
 // Version 1.4: referral Pending/Successful, new startapp link, referral boost, 3-level commission (pool), Spider Web
 // Version 1.6: bot notifications, live counters, admin stats and member details, member number, last active
+// Version 1.7: new button look, responsive layout, editable rules and notes, first-time guide, About and Help Center
 // =====================================================================
 const MAIN_ADMIN = "8825348718", ADMIN_USER = "Spider_Incom", BOT_USER = "SPC_Wallet_bot";
-const FOREVER = 4102444800000, SV = "12", APP_VERSION = "1.6";
+const FOREVER = 4102444800000, SV = "13", APP_VERSION = "1.7";
 // Supply: 10 billion SPC in total. The community (all user balances) may hold at most 50%.
 const TOTAL_SUPPLY = 1e10, CAP_PCT = 50, COMMUNITY_CAP = TOTAL_SUPPLY * CAP_PCT / 100;
 const CAPMSG = "The reward limit for the community supply is reached. Please try again later.";
 let SUP = { t: 0, v: 0 };
-const DEF = { rate: 10, minc: 5, refrw: 200, secs: 30, prw: 9.23, wd: 0, minw: 1000, ch: "", dep: "", wl: "USDT BEP20 address", vp1: 2, vp2: 10, vc: 1e5, vc2: 5e5, vr: 20, disc: 5, mins: 1000, srw: 100, sm: "", dtr: 15, spc: 25000, spu: 2, stt: 2000000, wbr: 100, wbf: 0, str: "", urt: "0.0001", wbn: 1000, dbl: 1, dbs: 0, dbe: 0, ci1: 10, ci2: 15, ci3: 20, ci4: 25, ci5: 30, ci6: 40, ci7: 100, cp1: 10, cp2: 5, cp3: 2.5 };
+const DEF = { rate: 10, minc: 5, refrw: 200, secs: 30, prw: 9.23, wd: 0, minw: 1000, ch: "", dep: "", wl: "USDT BEP20 address", vp1: 2, vp2: 10, vc: 1e5, vc2: 5e5, vr: 20, disc: 5, mins: 1000, srw: 100, sm: "", dtr: 15, spc: 25000, spu: 2, stt: 2000000, wbr: 100, wbf: 0, str: "", urt: "0.0001", wbn: 1000, dbl: 1, dbs: 0, dbe: 0, ci1: 10, ci2: 15, ci3: 20, ci4: 25, ci5: 30, ci6: 40, ci7: 100, cp1: 10, cp2: 5, cp3: 2.5,
+  rt_t: "Tap Start Task and open the link. Wait at least 30 seconds, then tap Claim. You can claim each task once per day. Tasks reset at 00:00 UTC.",
+  rt_r: "Share your referral link. Your friend must join the Official Channel and start mining or finish one task. Then the referral is Successful and you get the reward once. You also earn lifetime commission when your team buys stock or VIP.",
+  rt_w: "Join the Official Channel first. It is needed to send, receive and withdraw SPC. To send, enter a registered Telegram ID or @username. You need enough balance and the minimum amount. You cannot send to yourself. A sent transfer cannot be taken back.",
+  rt_c: "You can check in once per day. The reward grows from Day 1 to Day 7. If you miss a day, you start again at Day 1. After Day 7 you start again at Day 1. The day changes at 00:00 UTC.",
+  rt_s: "Stock and VIP/VVIP can be bought with SPC or USDT. USDT payments are checked by the admin before they become active. There is no guaranteed profit or return. Please read the rules before you buy.",
+  ab_m: "Our mission is to build a friendly community where everyone can learn, earn and grow together.",
+  ab_v: "Vision 2037: a strong and open Spider community with a Stock Farm that grows with its members.",
+  ab_d: "SPC is a community reward coin. There is no guarantee of profit or any return. Please use the app with care.",
+  faq: "How do I earn SPC?|Start mining on Home, finish tasks, check in every day and invite friends.\nHow do I invite friends?|Open the Refer tab and share your link. You get a reward when your friend joins the Official Channel and starts mining or finishes a task.\nWhy can I not send SPC?|You must join the Official Channel and have enough balance. The amount must also be above the minimum.\nWhere do I see the USDT value?|It is shown under your balance in the Wallet. The rate can change.\nWhen can I withdraw?|Withdrawal opens when the admin turns it on. Watch the Official Channel for news.",
+  sup: "" };
 const NK = ["rate", "minc", "refrw", "secs", "prw", "minw", "vp1", "vp2", "vc", "vc2", "vr", "disc", "mins", "srw", "dtr", "spc", "spu", "stt", "wbr", "wbf", "wbn"];
 const PL = { 1: { c: 5e3, v: 500, q: 0 }, 2: { c: 1e4, v: 1000, q: 0 }, 3: { c: 2e4, v: 1000, q: 1 } };
-const ADM = new Set(["al", "as", "at", "ae", "ad", "ap", "aw", "ao", "aa", "au", "ab", "ag", "ar", "dv", "cr", "ac", "cf", "sp", "sq", "so", "sx"]);
-const ROLE = { as: "cfg", at: "tk", ae: "tk", ad: "tk", ap: "tk", aw: "wd", ao: "od", au: "us", ab: "us", ag: "us", ar: "rt", dv: "rw", cr: "rw", ac: "cm", cf: "cm", sp: "st", sq: "st", so: "st", sx: "main", aa: "main" };
+const ADM = new Set(["al", "as", "at", "ae", "ad", "ap", "aw", "ao", "aa", "au", "ab", "ag", "ar", "dv", "cr", "ac", "cf", "rn", "sp", "sq", "so", "sx"]);
+const ROLE = { as: "cfg", at: "tk", ae: "tk", ad: "tk", ap: "tk", aw: "wd", ao: "od", au: "us", ab: "us", ag: "us", ar: "rt", dv: "rw", cr: "rw", ac: "cm", cf: "cm", rn: "ru", sp: "st", sq: "st", so: "st", sx: "main", aa: "main" };
 const J = (d, s = 200) => new Response(JSON.stringify(d), { status: s, headers: { "content-type": "application/json", "cache-control": "no-store" } });
 const tg = async (env, m, b) => { try { const r = await fetch("https://api.telegram.org/bot" + env.BOT_TOKEN + "/" + m, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(b) }); const j = await r.json(); if (j && j.ok === false && j.error_code !== 403) await logErr(env.DB, "bot", m, b && b.chat_id, "Telegram " + m + " failed: " + (j.description || j.error_code), "chat_id " + (b && b.chat_id)); return j } catch (e) { await logErr(env.DB, "bot", m, b && b.chat_id, e); return { ok: false } } };
 
@@ -171,6 +182,9 @@ async function init(db) {
     const hadWc = ((await db.prepare("PRAGMA table_info(u)").all()).results || []).some(x => x.name == "wc");
     await addCols("u", [["wc", "INTEGER DEFAULT 0"], ["cs", "INTEGER DEFAULT 0"], ["cd", "TEXT DEFAULT ''"]]);
     if (!hadWc) await db.prepare("UPDATE u SET wc=2").run(); // users who already exist do not get the new-user welcome bonus
+    const hadGd = ((await db.prepare("PRAGMA table_info(u)").all()).results || []).some(x => x.name == "gd");
+    await addCols("u", [["gd", "INTEGER DEFAULT 0"]]);
+    if (!hadGd) await db.prepare("UPDATE u SET gd=1").run(); // people who already use the app do not need the guide
     await addCols("t", [["bl", "TEXT DEFAULT ''"]]);
     await addCols("u", [["la", "INTEGER DEFAULT 0"], ["mn", "INTEGER DEFAULT 0"]]);
     await db.prepare("UPDATE u SET mn=(SELECT COUNT(*) FROM u u2 WHERE u2.ts<u.ts OR (u2.ts=u.ts AND u2.id<=u.id)) WHERE mn=0").run();
@@ -418,6 +432,15 @@ async function run(rq, env) {
         for (let i = 1; i <= 7; i++) { const x = Math.round(Number(q["c" + i]) * 1e6) / 1e6; if (!(x > 0 && x <= 1e6)) return E("Enter a reward above 0 for Day " + i); v.push(x) }
         await db.batch(v.map((x, i) => P("INSERT OR REPLACE INTO s(k,v) VALUES(?,?)", "ci" + (i + 1), String(x)))); CC.d = null; break;
       }
+      case "rn": {
+        const st = [];
+        for (const k of ["rt_t", "rt_r", "rt_w", "rt_c", "rt_s", "ab_m", "ab_v", "ab_d", "faq", "sup"]) {
+          const v = String(q[k] === undefined ? "" : q[k]).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "").trim().slice(0, k == "faq" ? 3000 : 800);
+          if (k == "sup" && v && !/^(@[A-Za-z0-9_]{3,32}|https:[/][/][^ ]{3,200})$/.test(v)) return E("Support link must be @username or start with https://");
+          st.push(P("INSERT OR REPLACE INTO s(k,v) VALUES(?,?)", k, v));
+        }
+        await db.batch(st); CC.d = null; break;
+      }
       case "ar": {
         const v0 = String(q.urt === undefined ? "" : q.urt).trim();
         if (!/^[0-9]{1,6}([.][0-9]{1,10})?$/.test(v0) || !(Number(v0) > 0)) return E("Enter a rate above 0 with up to 10 decimals, for example 0.0001");
@@ -477,7 +500,7 @@ async function run(rq, env) {
         if (!(tid > 0)) return E("Enter a numeric Telegram ID");
         if (String(tid) == MAIN) return E("Main admin cannot be changed");
         if (ON) {
-          const rl = [...new Set(String(q.rl || "").split(",").map(x => x.trim()).filter(x => ["cfg", "tk", "us", "wd", "od", "st", "lg", "sa", "rt", "cm", "rw"].includes(x)))];
+          const rl = [...new Set(String(q.rl || "").split(",").map(x => x.trim()).filter(x => ["cfg", "tk", "us", "wd", "od", "st", "lg", "sa", "rt", "cm", "rw", "ru"].includes(x)))];
           if (!rl.length) return E("Choose at least one role");
           await X("INSERT INTO admins(id,by,ts,rl) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET rl=excluded.rl", tid, id, now, rl.join(","));
         } else await X("DELETE FROM admins WHERE id=?", tid);
@@ -541,6 +564,7 @@ async function run(rq, env) {
   // ------------------------------------------------------------ user actions
   switch (a) {
     case "me": break;
+    case "gd": await X("UPDATE u SET gd=1 WHERE id=?", id); break;
     case "ms": await db.batch([P("INSERT OR IGNORE INTO mining(u,st) VALUES(?,0)", id), P("UPDATE mining SET st=? WHERE u=? AND st=0", now, id)]); await refCheck(db, env, c, id); break;
     case "mc": {
       if (!u.mst) return E("Start mining first");
@@ -753,7 +777,7 @@ async function run(rq, env) {
   u = r[0].results[0]; const l2 = u.vx > Date.now() ? u.vl : 0;
   const yst2 = new Date(Date.now() - 864e5).toISOString().slice(0, 10), alive = u.cd == today || u.cd == yst2, skn = alive ? (+u.cs || 0) : 0, dn = u.cd == today, cnt = !dn && skn >= 7 ? 0 : skn;
   const ck = { done: dn, n: cnt, nd: dn ? skn : cnt + 1, rw: [1, 2, 3, 4, 5, 6, 7].map(i => N("ci" + i)) };
-  return J({ lc: await liveCounters(db), u: { id: u.id, n: u.n, un: u.un, b: u.b, p: u.p, c: u.c, r: u.r, sl: u.sl, ss: u.ss, mst: u.mst, mn: u.mn }, c, tk: r[1].results, rf: r[2].results[0].s, rfs: r[2].results[0], sk: r[3].results[0] || { n: 0, fr: 0 }, wb: { n: r[4].results[0].n, t: r[4].results[0].t, on: u.ts > 0 && Date.now() - u.ts < 6048e5, end: u.ts + 6048e5, rw: N("wbr"), need: N("wbf") }, bot: BOT_USER, now: Date.now(), adm, lv: l2, er: (l2 ? N("vr") : N("rate")) * (1 + Math.min(100, 5 * (+u.rc || 0)) / 100), bst: Math.min(100, 5 * (+u.rc || 0)), gf: r[5].results, wn: u.wc === 0 ? N("wbn") : 0, ck });
+  return J({ lc: await liveCounters(db), u: { id: u.id, n: u.n, un: u.un, b: u.b, p: u.p, c: u.c, r: u.r, sl: u.sl, ss: u.ss, mst: u.mst, mn: u.mn, gd: u.gd }, c, tk: r[1].results, rf: r[2].results[0].s, rfs: r[2].results[0], sk: r[3].results[0] || { n: 0, fr: 0 }, wb: { n: r[4].results[0].n, t: r[4].results[0].t, on: u.ts > 0 && Date.now() - u.ts < 6048e5, end: u.ts + 6048e5, rw: N("wbr"), need: N("wbf") }, bot: BOT_USER, now: Date.now(), adm, lv: l2, er: (l2 ? N("vr") : N("rate")) * (1 + Math.min(100, 5 * (+u.rc || 0)) / 100), bst: Math.min(100, 5 * (+u.rc || 0)), gf: r[5].results, wn: u.wc === 0 ? N("wbn") : 0, ck });
 }
 
 // ---------------------------------------------------------------- invoice PDF (no external libraries)
@@ -923,11 +947,43 @@ header{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:10px;
 textarea{width:100%;padding:12px;margin:5px 0;border-radius:12px;border:1px solid var(--ln);background:#040c07;color:#e8fff2;font-size:15px;font-family:inherit}
 .chp{display:inline-block;padding:2px 9px;border-radius:12px;font-size:10px;font-weight:800;letter-spacing:.5px}.chp.a{background:rgba(61,220,151,.15);color:#3ddc97}.chp.p{background:rgba(240,210,122,.15);color:var(--gd)}.chp.x{background:rgba(255,84,112,.15);color:var(--rd)}
 @media(prefers-reduced-motion:reduce){*{animation:none!important}}
+
+.b{position:relative;overflow:hidden;display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;border-radius:14px;border:1px solid rgba(150,255,200,.45);background:repeating-conic-gradient(from 180deg at 100% 0,rgba(255,255,255,.16) 0 .8deg,transparent .8deg 12deg),repeating-radial-gradient(circle at 100% 0,rgba(255,255,255,.12) 0 1px,transparent 1px 10px),linear-gradient(135deg,#14a86c,#0a5c3b);box-shadow:0 3px 0 #04301e,0 8px 18px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.25);color:#f2fff8;font-weight:800;letter-spacing:.2px;text-shadow:0 1px 0 rgba(0,0,0,.4);transition:transform .08s,box-shadow .08s;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.b:active{transform:translateY(2px);box-shadow:0 1px 0 #04301e,0 3px 8px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.2)}
+.b:disabled{background:#12281c;border-color:var(--ln);box-shadow:none;color:var(--mu);transform:none;text-shadow:none;cursor:default}
+.b.x{background:linear-gradient(135deg,#ff5470,#b3213c);border-color:rgba(255,160,175,.5);box-shadow:0 3px 0 #5a0f1f,0 8px 18px rgba(0,0,0,.5)}
+.b.busy{opacity:.75;pointer-events:none}
+.b.busy::after{content:'';width:14px;height:14px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:spn .7s linear infinite}
+@keyframes spn{to{transform:rotate(360deg)}}
+.b.bk{margin-bottom:10px;width:auto;min-height:40px;padding:8px 16px}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.g2 .b{width:100%}
+.sg a{border:1px solid transparent;cursor:pointer}
+.sg a:not(.on){border-color:var(--ln)}
+nav a{position:relative}
+nav a.dot::after{content:'';position:absolute;top:3px;left:calc(50% + 8px);width:9px;height:9px;border-radius:50%;background:var(--rd);box-shadow:0 0 0 2px #050e09}
+details.rl,details.fq{border:1px solid var(--ln);border-radius:12px;padding:9px 12px;margin:8px 0;background:#06120b}
+details summary{cursor:pointer;font-weight:700;list-style:none}
+details summary::-webkit-details-marker{display:none}
+details.rl summary span{color:var(--a);font-weight:600;font-size:12px;margin-left:6px}
+details[open] summary{margin-bottom:6px}
+.aboutc{position:relative;overflow:hidden;text-align:center;padding:20px 14px}
+.aboutc::before{content:'';position:absolute;top:0;right:0;bottom:0;left:0;background:repeating-conic-gradient(from 0deg at 50% 0,rgba(45,255,160,.12) 0 1deg,transparent 1deg 12deg),repeating-radial-gradient(circle at 50% 0,rgba(45,255,160,.12) 0 1px,transparent 1px 36px);pointer-events:none}
+.aboutc>*{position:relative}
+.aboutc h4{margin:14px 0 4px;color:var(--a)}
+html,body{overflow-x:hidden}
+body{min-height:100dvh}
+img,svg,canvas,video{max-width:100%}
+.c{overflow-wrap:anywhere}
+table{display:block;overflow-x:auto;max-width:100%}
+@media(min-width:768px){body{max-width:640px}nav{max-width:640px}}
+@media(min-width:1100px){body{max-width:760px}nav{max-width:760px}}
+@media(max-width:350px){body{padding:0 8px 96px}header{margin:0 -8px;padding:0 8px}.b{min-height:40px;font-size:13px;padding:8px 10px}nav a{font-size:10px}.sg a{font-size:11px}.g2{grid-template-columns:1fr}}
 </style></head><body><div id="app"><p class="m" style="padding:40px;text-align:center">Loading…</p></div><div id="ts"></div><div id="pp"></div><nav id="nav"></nav>
 <script>
 const VER='{{VER}}',GEAR='<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',CLOSE='<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>';
 const T=Telegram.WebApp,$=s=>document.getElementById(s);T.ready();T.expand();try{T.setHeaderColor('#070d0a');T.setBackgroundColor('#070d0a')}catch(e){}
-const ADM=['al','ar','dv','cr','ac','cf','as','at','ae','ad','ap','aw','ao','aa','au','ab','ag','sp','sq','so','sx'];
+const ADM=['al','ar','dv','cr','ac','cf','rn','as','at','ae','ad','ap','aw','ao','aa','au','ab','ag','sp','sq','so','sx'];
 let S,off=0,tab='h',AD=0,pb=null,HI=null,BD=null,fsub='m',FM=null,FI=null;
 const CN='<svg viewBox="0 0 64 64" width="52" height="52"><defs><radialGradient id="cg" cx=".35" cy=".3"><stop offset="0" stop-color="#7dffc4"/><stop offset="1" stop-color="#0a8a52"/></radialGradient></defs><circle cx="32" cy="32" r="29" fill="url(#cg)" stroke="#f0d27a" stroke-width="3"/><circle cx="32" cy="32" r="23" fill="none" stroke="#03140a" stroke-opacity=".45" stroke-width="2"/><path d="M32 16v32M20 22l24 20M44 22L20 42" stroke="#03140a" stroke-width="2.5" stroke-linecap="round"/></svg>';
 let wsub='s';const OKM={sd:'Sent ✓',bv:'Badge activated ★',wd:'Withdrawal requested',pr:'Promo submitted',vo:'Order submitted for review',ms:'Mining started',fb:'Stock purchased ✓',fu:'USDT order submitted for review',ff:'Free stock claimed ✓',xs:'Stock sent ✓',wb:'Bonus claimed ✓',sp:'Entry posted ✓',sq:'Rules saved ✓',so:'Order processed ✓'};
@@ -937,7 +993,7 @@ const toast=m=>{const e=$('ts');e.textContent=m;e.className='on';clearTimeout(to
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>'&#'+c.charCodeAt(0)+';'),f=n=>{n=+n;return n!==0&&Math.abs(n)<0.01?String(+n.toFixed(6)):n.toFixed(2)},host=u=>String(u).replace(/^https?:[/][/]/,'').split('/')[0];
 const api=async(a,d)=>{try{const r=await(await fetch('/api',{method:'POST',body:JSON.stringify(Object.assign({i:T.initData},d||{},{a:a}))})).json();if(r.e){toast(r.e);return null}return r}catch(e){toast('Network error');return null}};
 const act=async(a,d)=>{const b0=S?S.u.b:0,r=await api(a,d);if(!r)return;
-if(ADM.indexOf(a)>-1){AD=r;if(r.ex){exportSheet(r.ex);r.ex=null}if(a=='sp'||a=='so')FM=null;if(a=='as'||a=='sq'||a=='ar'||a=='ac'){await act('me');return}}
+if(ADM.indexOf(a)>-1){AD=r;if(r.ex){exportSheet(r.ex);r.ex=null}if(a=='sp'||a=='so')FM=null;if(a=='as'||a=='sq'||a=='ar'||a=='ac'||a=='rn'){await act('me');return}}
 else{S=r;off=r.now-Date.now();if(a!='me')HI=null;if(a=='vo')BD=null;if(['fb','fu','ff','xs'].indexOf(a)>-1){FM=null;FI=null}}
 render();if(S&&S.u.b>b0+1e-9&&['mc','tc','rc','sc','wb','gc','wn','ci'].indexOf(a)>-1){toast('+'+f(S.u.b-b0)+' SPC');try{T.HapticFeedback.notificationOccurred('success')}catch(e){}}else if(OKM[a])toast(OKM[a])};
 const L={wbn:'Welcome bonus SPC (new users)',rate:'Mining SPC / day',minc:'Min claim',refrw:'Referral reward',secs:'Task wait seconds (min 30)',dtr:'Default daily task reward',prw:'Promoted task reward',wd:'Withdraw (1 on, 0 off)',minw:'Min withdraw',ch:'Required channels (@a,@b)',dep:'USDT BEP20 deposit address',wl:'Withdraw address label',vp1:'VIP USDT',vp2:'VVIP USDT',vc:'VIP coin price',vc2:'VVIP coin price',vr:'VIP SPC/day',disc:'VIP promo discount %',mins:'Min send',srw:'Story reward',sm:'Story image URL (https)',spc:'Stock price (SPC coins)',spu:'Stock price (USDT)',stt:'Total stock limit',wbr:'Welcome bonus SPC per day',wbf:'Welcome bonus: referrals needed (0 = none)'};
@@ -956,18 +1012,19 @@ function popup(){const p=$('pp');if(!p||!S)return;let h='';
 const g=(S.gf||[]).find(function(x){return !PPX['g'+x.id]});
 if(g)h='<div class="pbox"><div class="gift">🎁</div><b style="font-size:20px;color:var(--gd)">Congratulations!</b><div style="margin:4px 0 8px">Your Reward</div><div class="m">'+esc(g.lb)+'</div><div style="font-size:30px;font-weight:800;color:var(--a);margin:8px 0 2px">+'+fk(g.amt)+' SPC</div><div class="m" style="margin-bottom:14px">'+uxs(g.amt)+'</div><button class="b" data-a="gc" data-id="'+g.id+'">Claim reward</button><div class="m" style="margin-top:12px"><a data-a="pl" data-k="g'+g.id+'">Later</a></div></div>';
 else if(S.wn>0&&!PPX.wn)h='<div class="pbox"><div class="gift">🕷️</div><b style="font-size:20px;color:var(--gd)">Welcome to SPIDER COMMUNITY!</b><div class="m" style="margin:6px 0">Your welcome bonus is ready</div><div style="font-size:30px;font-weight:800;color:var(--a);margin:8px 0 2px">+'+fk(S.wn)+' SPC</div><div class="m" style="margin-bottom:14px">'+uxs(S.wn)+'</div><button class="b" data-a="wn">Claim bonus</button><div class="m" style="margin-top:12px"><a data-a="pl" data-k="wn">Later</a></div></div>';
+if(!h&&S.gd===0){const G=[['🕷️','Welcome to SPIDER COMMUNITY','Earn SPC coins with mining, tasks and daily check-in.'],['⚡','Mining on Home','Tap Start on Home. Come back later and claim your SPC.'],['👥','Invite friends','Share your link in Refer. You get a reward and lifetime commission.'],['👛','Your Wallet','Join the Official Channel, then send SPC to friends. Your USDT value is always shown.']],i=Math.min(GS,G.length-1),g=G[i],last=i==G.length-1;h='<div class="pbox"><div class="gift">'+g[0]+'</div><b style="font-size:19px;color:var(--gd)">'+g[1]+'</b><div class="m" style="margin:8px 0 14px">'+g[2]+'</div><div class="m" style="margin-bottom:10px">'+(i+1)+' / '+G.length+'</div>'+(last?'<button class="b" data-a="gd">Start</button>':'<button class="b" data-a="gn">Next</button><div class="m" style="margin-top:12px"><a data-a="gd">Skip</a></div>')+'</div>'}
 p.className=h?'on':'';p.innerHTML=h}
 function dblbar(){const k=+S.c.dbl,n=Date.now()+off;if(k>1&&n>=+S.c.dbs&&n<=+S.c.dbe)return '<div class="c" style="border-color:var(--gd);text-align:center">⚡ <b>Double Reward x'+k+' is ON</b><div class="m">Task rewards and mining claims. Ends '+new Date(+S.c.dbe).toLocaleString()+'</div></div>';return ''}
 function checkin(){const k=S.ck;if(!k)return '';let t='';
 for(let i=1;i<=7;i++){const dn=i<=k.n,cur=!k.done&&i==k.nd;
 t+='<div style="border:1px solid '+(cur?'var(--gd)':'var(--ln)')+';border-radius:12px;padding:8px 4px;text-align:center;background:'+(dn?'rgba(45,255,160,.12)':'transparent')+'"><div class="m">Day '+i+'</div><b style="color:'+(dn?'var(--a)':'var(--gd)')+'">'+fk(k.rw[i-1])+'</b><div class="m">'+(dn?'✓':cur?'Today':'🔒')+'</div></div>'}
-return '<div class="c"><b>Daily Check-in</b><p class="m">Streak: '+k.n+' day'+(k.n==1?'':'s')+'</p><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(64px,1fr));gap:6px;margin:8px 0">'+t+'</div>'+(k.done?'<button class="b" disabled>Checked in today ✓</button>':'<button class="b" data-a="ci">Claim Day '+k.nd+' · +'+fk(k.rw[k.nd-1])+' SPC</button>')+'<p class="m">One claim per day. If you miss a day, the streak starts again at Day 1. After Day 7 it starts again at Day 1. Resets at 00:00 UTC.</p></div>'}
+return '<div class="c"><b>Daily Check-in</b><p class="m">Streak: '+k.n+' day'+(k.n==1?'':'s')+'</p><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(64px,1fr));gap:6px;margin:8px 0">'+t+'</div>'+(k.done?'<button class="b" disabled>Checked in today ✓</button>':'<button class="b" data-a="ci">Claim Day '+k.nd+' · +'+fk(k.rw[k.nd-1])+' SPC</button>')+''+rulebox('rt_c','Check-in rules')+'</div>'}
 function rewardsadm(){const c=AD.c,n=Date.now(),on=+c.dbl>1&&n>=+c.dbs&&n<=+c.dbe;
 let x='<div class="c" data-f><b>Double Reward event</b><p class="m">'+(on?'ON now: x'+esc(c.dbl)+' until '+new Date(+c.dbe).toLocaleString():'No event is running.')+' It applies to task rewards and mining claims made during the event.</p><input name="k" type="number" step="any" placeholder="Multiplier (for example 2)"><div class="m">Start</div><input name="s" type="datetime-local"><div class="m">End</div><input name="e" type="datetime-local"><div class="g"><button class="b" data-a="dv">Start event</button>'+(on?'<button class="b x" data-a="dv" data-stop="1">Stop now</button>':'')+'</div></div>';
 x+='<div class="c" data-f><b>Daily check-in rewards (SPC)</b>'+[1,2,3,4,5,6,7].map(function(i){return '<div class="r" style="padding:2px 0"><span class="m">Day '+i+'</span><input name="c'+i+'" type="number" step="any" value="'+esc(c['ci'+i])+'" style="max-width:120px"></div>'}).join('')+'<button class="b" data-a="cr">Save rewards</button></div>';
 x+='<div class="c"><b>Gifts</b><p class="m">Give coins from the Users section with a label. The user sees a gift popup and taps Claim.</p>'+(AD.gfx&&AD.gfx.length?AD.gfx.map(function(g){return '<div class="r" style="border-bottom:1px solid var(--ln)"><span>'+esc(g.n||g.u)+' · '+esc(g.lb)+'<br><span class="m">'+new Date(g.ts).toLocaleString()+'</span></span><span style="text-align:right"><b>+'+fk(g.amt)+'</b><br><span class="m">'+(g.st=='c'?'Claimed':'Unclaimed')+'</span></span></div>'}).join(''):'<p class="m">No gifts yet.</p>')+'</div>';
 return x}
-function tasks(){return dblbar()+checkin()+story()+tl()+promo()}
+function tasks(){return dblbar()+checkin()+rulebox('rt_t','Task rules')+story()+tl()+promo()}
 let RFD=null,RFT=0;
 function web(){const L=(RFD&&RFD.l)||[],n=Math.min(L.length,24);
 let g='<svg viewBox="0 0 300 300" style="width:100%;max-width:340px;display:block;margin:6px auto">';
@@ -1040,12 +1097,23 @@ function joinnote(){const hs=String(S.c.ch||'').split(',').map(h=>h.trim()).filt
 if(Date.now()-CMT>6e4){CMT=Date.now();api('cm').then(function(r){if(r){CM=r.m;render()}})}
 if(CM===true)return '';
 return '<div class="c" style="border-color:var(--gd)"><b>Official Channel is required</b><p class="m">You must join the Official Channel to send, receive and withdraw SPC.</p>'+hs.map(h=>'<button class="b" data-a="ol" data-l="https://t.me/'+esc(h.replace('@',''))+'">Join '+esc(h)+'</button>').join('')+'<p class="m">After joining, open this page again.</p></div>'}
+let GS=0;
+function dotf(t){if(!S)return false;if(t=='h')return !!((S.gf&&S.gf.length>0)||S.wn>0);if(t=='t')return !!(S.ck&&!S.ck.done);return false}
+function rulebox(k,t){const x=String((S.c&&S.c[k])||'').trim();if(!x)return '';return '<details class="rl"><summary>'+esc(t)+' <span>Read rules</span></summary>'+x.split(String.fromCharCode(10)).filter(Boolean).map(function(l){return '<p class="m">'+esc(l)+'</p>'}).join('')+'</details>'}
+function aboutbtns(){return '<div class="c"><div class="g2"><button class="b" data-a="tab" data-t="ab">About SPIDER</button><button class="b" data-a="tab" data-t="hp">Help Center</button></div></div>'}
+function backbtn(){return '<button class="b bk" data-a="tab" data-t="h">&larr; Back to Home</button>'}
+function about(){const c=S.c;return backbtn()+'<div class="c aboutc"><b style="font-size:22px;color:var(--gd)">SPIDER COMMUNITY</b><div class="m" style="margin-top:2px">Vision 2037 Stock Farm</div><h4>Our Mission</h4><p>'+esc(c.ab_m)+'</p><h4>Our Vision</h4><p>'+esc(c.ab_v)+'</p></div><div class="c"><b>Important notice</b><p class="m">'+esc(c.ab_d)+'</p></div>'}
+function suplink(){const s=String((S.c&&S.c.sup)||'').trim();return s.charAt(0)=='@'?'https://t.me/'+s.slice(1):s}
+function help(){const q=String(S.c.faq||'').split(String.fromCharCode(10)).filter(Boolean).map(function(l){const i=l.indexOf('|');return [(i<0?l:l.slice(0,i)).trim(),i<0?'':l.slice(i+1).trim()]});
+return backbtn()+'<div class="c"><b>Help Center</b><p class="m">Tap a question to see the answer.</p>'+q.map(function(x){return '<details class="fq"><summary>'+esc(x[0])+'</summary><p class="m">'+esc(x[1])+'</p></details>'}).join('')+'</div>'+(suplink()?'<div class="c"><b>Need more help?</b><p class="m">Our support team can help you.</p><button class="b" data-a="ol" data-l="'+esc(suplink())+'">Contact Support</button></div>':'')}
+function rulesadm(){const c=AD.c,F=[['rt_t','Task rules'],['rt_r','Referral rules'],['rt_w','Send and receive rules'],['rt_c','Check-in rules'],['rt_s','Stock and VIP/VVIP rules'],['ab_m','About: Mission'],['ab_v','About: Vision'],['ab_d','About: Important notice'],['faq','Help Center questions (one per line: Question | Answer)']];
+return '<div class="c" data-f><b>Rules and content</b><p class="m">Users see these texts in the app. Keep them short and simple. Use a new line for a new rule.</p>'+F.map(function(f){return '<div class="m" style="margin-top:8px">'+f[1]+'</div><textarea name="'+f[0]+'" rows="'+(f[0]=='faq'?7:3)+'">'+esc(c[f[0]])+'</textarea>'}).join('')+'<div class="m" style="margin-top:8px">Support link (@username or https:// link)</div><input name="sup" value="'+esc(c.sup)+'" placeholder="@support_username"><button class="b" data-a="rn" style="margin-top:10px">Save</button></div>'}
 function wallet(){const u=S.u,v=S.lv,K={mc:'Mining',task:'Task',referral:'Referral',sent:'Sent',received:'Received',promo:'Promo',vip:'VIP',withdraw:'Withdraw',commission:'Commission',refund:'Refund',story:'Story',admin:'Admin',stock:'Stock',farm:'Farm profit',bonus:'Welcome bonus',gift:'Gift',checkin:'Daily check-in'};
 let x=card()+rateline()+'<div class="sg">'+[['s','Send'],['w','Withdraw'],['v','VIP'],['h','History']].map(t=>'<a data-a="ws" data-s="'+t[0]+'" class="'+(wsub==t[0]?'on':'')+'">'+t[1]+'</a>').join('')+'</div>';
-if(wsub=='s'){x+=joinnote();
+if(wsub=='s'){x+=joinnote()+rulebox('rt_w','Send and receive rules');
 x+='<div class="c"><b>Your ID</b><div class="r"><span style="font-family:ui-monospace,monospace;font-size:18px;color:var(--a)">'+u.id+(u.un?'<br><span class="m">@'+esc(u.un)+'</span>':'')+'</span><button class="b" data-a="cp" data-l="'+u.id+'">Copy ID</button></div><p class="m">Share your ID so others can send you SPC.</p></div>';
 x+='<div class="c" data-f><b>Send SPC</b><input name="to" placeholder="@username or Telegram ID" autocomplete="off"><input name="amt" type="number" step="any" placeholder="Amount (min '+S.c.mins+')"><button class="b" data-a="sd">Send</button><p class="m">The receiver must have opened the app once.</p></div>'}
-else if(wsub=='w'){x+=joinnote();
+else if(wsub=='w'){x+=joinnote()+rulebox('rt_w','Send and receive rules');
 x+=S.c.wd=='1'?'<div class="c" data-f><b>Withdraw</b><p class="m">Requests are reviewed and paid manually by an admin.'+(v>1?' VVIP: priority review.':'')+'</p><input name="amt" type="number" step="any" placeholder="Min '+S.c.minw+'"><input name="ad" placeholder="'+esc(S.c.wl)+'"><button class="b" data-a="wd">Withdraw</button></div>':'<div class="c" style="text-align:center;padding:30px 14px"><div style="font-size:36px">🔒</div><b style="font-size:17px;color:var(--gd)">Withdrawal Start in 2027</b></div>'}
 else if(wsub=='v'){
 x+=tier(1,S.c.vc,S.c.vp1,['Mining '+S.c.vr+' SPC/day','-'+S.c.disc+'% on coin promos','Gold VIP badge','Permanent'],v)+tier(2,S.c.vc2,S.c.vp2,['Everything in VIP','1 free 1k-visit promo every month','Priority withdrawal review','Premium VVIP badge'],v);
@@ -1096,11 +1164,11 @@ h+='<div style="border-top:1px solid var(--ln);padding:8px 0;word-break:break-wo
 })}
 return h+'</div>'}
 function admin(){if(!AD||!AD.c){if(!AD){AD=1;act('al')}return '<p class="m">Loading…</p>'}
-const has=r=>AD.im||AD.rl.indexOf(r)>-1,RL=[['cfg','Settings'],['tk','Tasks'],['us','Users'],['wd','Withdrawals'],['od','Orders'],['st','Stock'],['lg','Error Logs'],['sa','Stats & Members'],['rt','Rates & Supply'],['rw','Gifts & Rewards'],['cm','Commission']];
+const has=r=>AD.im||AD.rl.indexOf(r)>-1,RL=[['cfg','Settings'],['tk','Tasks'],['us','Users'],['wd','Withdrawals'],['od','Orders'],['st','Stock'],['lg','Error Logs'],['sa','Stats & Members'],['rt','Rates & Supply'],['rw','Gifts & Rewards'],['cm','Commission'],['ru','Rules & Content']];
 const bt=(a,id,ok,t,x)=>'<button class="b'+(x?' x':'')+'" data-a="'+a+'" data-id="'+id+'" data-ok="'+ok+'">'+t+'</button>';
 const cks=sel=>RL.map(r=>'<label class="ck"><input type="checkbox" value="'+r[0]+'"'+(sel.indexOf(r[0])>-1?' checked':'')+'>'+r[1]+'</label>').join('');
 let x='<div class="c"><b>🛠 Admin</b> <span class="m">App v'+VER+' · Users: '+AD.n+' · '+(AD.im?'Main Admin':'Roles: '+AD.rl.join(', '))+'</span></div>';
-if(has('cfg'))x+='<div class="c" data-f><b>Settings</b>'+Object.keys(L).map(k=>'<span class="m">'+L[k]+'</span><input name="'+k+'" value="'+esc(AD.c[k])+'">').join('')+'<button class="b" data-a="as">Save</button></div>';
+if(has('cfg'))x+='<div class="c" data-f><b style="display:block;margin-bottom:6px">Settings</b>'+Object.keys(L).map(k=>'<span class="m">'+L[k]+'</span><input name="'+k+'" value="'+esc(AD.c[k])+'">').join('')+'<button class="b" data-a="as">Save</button></div>';
 if(has('tk')){x+='<div class="c"><b>Daily tasks (max 10)</b>'+AD.tk.filter(k=>!k.o&&k.st=='a').map(k=>'<div data-f style="border-bottom:1px solid var(--ln);padding:6px 0"><input name="url" value="'+esc(k.url)+'"><input name="bl" maxlength="24" placeholder="Button label (e.g. Visit Channel)" value="'+esc(k.bl||'')+'"><input name="rw" type="number" step="any" value="'+k.rw+'"><div class="g"><button class="b" data-a="ae" data-id="'+k.id+'">Save</button>'+bt('ad',k.id,'','Delete',1)+'</div></div>').join('')+'<div data-f><input name="url" placeholder="https://..."><input name="bl" maxlength="24" placeholder="Button label (e.g. Visit Channel)"><input name="rw" type="number" step="any" placeholder="Reward (default '+esc(AD.c.dtr)+')"><button class="b" data-a="at">Add task</button></div></div>';
 x+='<div class="c"><b>Promo orders</b>'+AD.tk.filter(k=>k.o).map(k=>'<div class="r"><span>'+esc(k.url)+'<br><span class="m">owner '+k.o+' · left '+k.l+(k.st=='p'?' · '+esc(k.x):'')+'</span></span>'+(k.st=='p'?bt('ap',k.id,'1','✓')+bt('ap',k.id,'','✕',1):bt('ad',k.id,'','✕',1))+'</div>').join('')+'</div>'}
 if(has('od'))x+='<div class="c"><b>VIP orders</b>'+AD.od.map(o=>'<div class="r"><span>'+o.u+' · '+o.k+'<br><span class="m">'+esc(o.tx)+'</span></span>'+bt('ao',o.id,'1','✓')+bt('ao',o.id,'','✕',1)+'</div>').join('')+'</div>';
@@ -1111,6 +1179,7 @@ x+='<div class="c"><b>Stock USDT orders</b>'+AD.so.map(o=>'<div class="r"><span>
 x+='<div class="c" data-f><b>Stock rules (visible to all)</b><textarea name="str" rows="7" placeholder="Write the stock rules here...">'+esc(AD.c.str)+'</textarea><button class="b" data-a="sq">Save rules</button></div>'}
 if(has('rw'))x+=rewardsadm();
 if(has('sa'))x+=memb();
+if(has('ru'))x+=rulesadm();
 if(has('rt'))x+=ratesupply();
 if(has('cm'))x+=comm();
 if(has('lg'))x+=errlog();
@@ -1118,12 +1187,12 @@ if(AD.im){x+='<div class="c"><b>Stock holders sheet</b><p class="m">Name, numeri
 x+='<div class="c"><b>Admins and roles</b><div class="r"><span>'+AD.main+' · Main Admin (all roles)</span></div>'+AD.ad.filter(z=>String(z.id)!=String(AD.main)).map(z=>'<div data-f style="border-top:1px solid var(--ln);padding:8px 0"><div class="r" style="padding:0"><b>'+z.id+'</b><button class="b x" data-a="aa" data-id="'+z.id+'" data-on="">Remove</button></div>'+cks(String(z.rl||'').split(','))+'<button class="b" data-a="aa" data-id="'+z.id+'" data-on="1">Save roles</button></div>').join('')+'<div data-f style="border-top:1px solid var(--ln);padding-top:8px"><input name="id" type="number" placeholder="Telegram numeric ID">'+cks(['cfg','tk','us','wd','od','st'])+'<button class="b" data-a="aa" data-on="1">Add admin</button></div></div>'}
 return x}
 function render(){const u=S.u;
-$('app').innerHTML='<header><div class="av">'+esc(Array.from(u.n||'?')[0])+'</div><div class="tt"><b>'+esc(u.n)+bdg(S.lv,1)+'</b><span>ID '+u.id+(u.un?' · @'+esc(u.un):'')+'</span>'+(u.mn?'<span style="color:var(--gd)">SPIDER Member #'+u.mn+(u.mn<=1000?' · Early Member':'')+'</span>':'')+'</div>'+(S.adm?'<div class="gr" data-a="tab" data-t="'+(tab=='a'?'h':'a')+'">'+(tab=='a'?CLOSE:GEAR)+'</div>':'')+'</header><div class="pg">'+({h:home,t:tasks,f:farm,r:refer,b:board,w:wallet,a:admin})[tab]()+'</div>';
+$('app').innerHTML='<header><div class="av">'+esc(Array.from(u.n||'?')[0])+'</div><div class="tt"><b>'+esc(u.n)+bdg(S.lv,1)+'</b><span>ID '+u.id+(u.un?' · @'+esc(u.un):'')+'</span>'+(u.mn?'<span style="color:var(--gd)">SPIDER Member #'+u.mn+(u.mn<=1000?' · Early Member':'')+'</span>':'')+'</div>'+(S.adm?'<div class="gr" data-a="tab" data-t="'+(tab=='a'?'h':'a')+'">'+(tab=='a'?CLOSE:GEAR)+'</div>':'')+'</header><div class="pg">'+({h:function(){return home()+aboutbtns()},t:tasks,f:function(){return rulebox('rt_s','Stock and VIP rules')+farm()},r:function(){return refer()+rulebox('rt_r','Referral rules')},b:board,w:wallet,a:admin,ab:about,hp:help})[tab]()+'</div>';
 const IC={f:'<path d="M12 21v-9M12 12c-4 0-6-2-6-6 4 0 6 2 6 6zM12 14c0-4 2-6 6-6 0 4-2 6-6 6z"/>',h:'<path d="M13 2L4 14h7l-1 8 9-12h-7z"/>',t:'<circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/>',r:'<circle cx="10" cy="8" r="3.5"/><path d="M3.5 20v-1a4 4 0 014-4h5a4 4 0 014 4v1"/>',b:'<path d="M5 20V10M12 20V4M19 20v-7"/>',w:'<rect x="3" y="6" width="18" height="13" rx="3"/><path d="M16 13h2"/>',a:'<circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/>'};
 const tb=[['h','Home'],['t','Tasks'],['f','Farm'],['r','Refer'],['b','Ranking'],['w','Wallet']];
-$('nav').innerHTML=tb.map(t=>'<a data-a="tab" data-t="'+t[0]+'" class="'+(tab==t[0]?'on':'')+'"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">'+IC[t[0]]+'</svg>'+t[1]+'</a>').join('');
+$('nav').innerHTML=tb.map(t=>'<a data-a="tab" data-t="'+t[0]+'" class="'+(tab==t[0]?'on':'')+(dotf(t[0])?' dot':'')+'"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">'+IC[t[0]]+'</svg>'+t[1]+'</a>').join('');
 const bl=$('bal');if(bl){if(pb!==null&&pb!=u.b){const a0=+pb,t0=performance.now(),to=+u.b,st=t=>{const k=Math.min(1,(t-t0)/600);bl.textContent=f(a0+(to-a0)*k);if(k<1)requestAnimationFrame(st)};requestAnimationFrame(st)}pb=u.b}ld();popup()}
-document.onclick=e=>{const b=e.target.closest('[data-a]');if(!b)return;try{T.HapticFeedback.impactOccurred('light')}catch(e){}const d=Object.assign({},b.dataset),a=d.a,F=b.closest('[data-f]');
+document.onclick=e=>{const b=e.target.closest('[data-a]');if(!b)return;if(b.tagName=='BUTTON'){if(b.classList.contains('busy'))return;b.classList.add('busy');setTimeout(function(){b.classList.remove('busy')},1200)}try{T.HapticFeedback.impactOccurred('light')}catch(e){}const d=Object.assign({},b.dataset),a=d.a,F=b.closest('[data-f]');
 if(F)F.querySelectorAll('input,select,textarea').forEach(i=>{if(i.name)d[i.name]=i.value});
 if(a=='dv'&&d.stop!='1'){d.s=new Date(d.s).getTime()||0;d.e=new Date(d.e).getTime()||0}
 if(a=='aa'&&F)d.rl=[].slice.call(F.querySelectorAll('input[type=checkbox]:checked')).map(i=>i.value).join(',');
@@ -1133,6 +1202,7 @@ else if(a=='sv'){try{T.shareToStory(S.c.sm,{text:'Mine Spider Coin with me!',wid
 else if(a=='sa'){api('sa').then(function(r){if(r){ST=r;render()}})}
 else if(a=='ud'){api('ud',d).then(function(r){if(!r)return;if(r.us){UL=r.us;UD=null}else if(r.d){UD=r.d}render()})}
 else if(a=='udx'){UD=null;render()}
+else if(a=='gn'){GS++;popup()}
 else if(a=='lg'||a=='lc'||a=='lt'){(a=='lt'?api('lt').then(function(){return api('lg')}):api(a)).then(function(r){if(r&&r.lg){LG=r.lg;render()}})}
 else if(a=='pl'){PPX[d.k]=1;popup()}
 else if(a=='cp'){try{navigator.clipboard.writeText(d.l).then(()=>toast('Copied ✓'),()=>cpf(d.l))}catch(e){cpf(d.l)}}
