@@ -10,9 +10,10 @@
 // Version 1.4: referral Pending/Successful, new startapp link, referral boost, 3-level commission (pool), Spider Web
 // Version 1.6: bot notifications, live counters, admin stats and member details, member number, last active
 // Version 1.7: new button look, responsive layout, editable rules and notes, first-time guide, About and Help Center
+// Version 1.8: personal poster (square) and story image, Download / Share to Story / Share to Chat / Send to my chat
 // =====================================================================
 const MAIN_ADMIN = "8825348718", ADMIN_USER = "Spider_Incom", BOT_USER = "SPC_Wallet_bot";
-const FOREVER = 4102444800000, SV = "13", APP_VERSION = "1.7";
+const FOREVER = 4102444800000, SV = "14", APP_VERSION = "1.8.1";
 // Supply: 10 billion SPC in total. The community (all user balances) may hold at most 50%.
 const TOTAL_SUPPLY = 1e10, CAP_PCT = 50, COMMUNITY_CAP = TOTAL_SUPPLY * CAP_PCT / 100;
 const CAPMSG = "The reward limit for the community supply is reached. Please try again later.";
@@ -22,10 +23,10 @@ const DEF = { rate: 10, minc: 5, refrw: 200, secs: 30, prw: 9.23, wd: 0, minw: 1
   rt_r: "Share your referral link. Your friend must join the Official Channel and start mining or finish one task. Then the referral is Successful and you get the reward once. You also earn lifetime commission when your team buys stock or VIP.",
   rt_w: "Join the Official Channel first. It is needed to send, receive and withdraw SPC. To send, enter a registered Telegram ID or @username. You need enough balance and the minimum amount. You cannot send to yourself. A sent transfer cannot be taken back.",
   rt_c: "You can check in once per day. The reward grows from Day 1 to Day 7. If you miss a day, you start again at Day 1. After Day 7 you start again at Day 1. The day changes at 00:00 UTC.",
-  rt_s: "Stock and VIP/VVIP can be bought with SPC or USDT. USDT payments are checked by the admin before they become active. There is no guaranteed profit or return. Please read the rules before you buy.",
+  rt_s: "Stock and VIP/VVIP can be bought with SPC or USDT. USDT payments are checked by the admin before they become active. Please read the rules before you buy.",
   ab_m: "Our mission is to build a friendly community where everyone can learn, earn and grow together.",
   ab_v: "Vision 2037: a strong and open Spider community with a Stock Farm that grows with its members.",
-  ab_d: "SPC is a community reward coin. There is no guarantee of profit or any return. Please use the app with care.",
+  ab_d: "SPIDER COMMUNITY is a growing community. Please read the rules before you use the app.",
   faq: "How do I earn SPC?|Start mining on Home, finish tasks, check in every day and invite friends.\nHow do I invite friends?|Open the Refer tab and share your link. You get a reward when your friend joins the Official Channel and starts mining or finishes a task.\nWhy can I not send SPC?|You must join the Official Channel and have enough balance. The amount must also be above the minimum.\nWhere do I see the USDT value?|It is shown under your balance in the Wallet. The rate can change.\nWhen can I withdraw?|Withdrawal opens when the admin turns it on. Watch the Official Channel for news.",
   sup: "" };
 const NK = ["rate", "minc", "refrw", "secs", "prw", "minw", "vp1", "vp2", "vc", "vc2", "vr", "disc", "mins", "srw", "dtr", "spc", "spu", "stt", "wbr", "wbf", "wbn"];
@@ -208,6 +209,8 @@ async function init(db) {
       db.prepare("CREATE INDEX IF NOT EXISTS invs ON inv(st,pm,ts)"),
       db.prepare("CREATE INDEX IF NOT EXISTS stlu ON stl(u,id)"),
       db.prepare("CREATE INDEX IF NOT EXISTS els ON el(ls)"),
+      db.prepare("CREATE TABLE IF NOT EXISTS pi(id TEXT PRIMARY KEY,u INTEGER,k TEXT,d TEXT,ts INTEGER,sn INTEGER DEFAULT 0)"),
+      db.prepare("CREATE INDEX IF NOT EXISTS piu ON pi(u)"),
       db.prepare("CREATE INDEX IF NOT EXISTS gfu ON gf(u,st)"),
       db.prepare("INSERT OR IGNORE INTO s(k,v) VALUES('_sold','0')"),
       db.prepare("INSERT OR REPLACE INTO s(k,v) VALUES('_sv',?)").bind(SV)]);
@@ -273,6 +276,15 @@ export default {
         } catch (e) { await logErr(db, "server", "webhook", 0, e) }
         return new Response("ok");
       }
+      const pm = U.pathname.match(/^\/p\/([a-f0-9]{32})\.jpg$/);
+      if (pm && rq.method == "GET") {
+        await init(db);
+        const row = await db.prepare("SELECT d FROM pi WHERE id=?").bind(pm[1]).first();
+        if (!row) return new Response("Not found", { status: 404 });
+        const bin = atob(row.d), by = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) by[i] = bin.charCodeAt(i);
+        return new Response(by, { headers: { "content-type": "image/jpeg", "cache-control": "public, max-age=3600" } });
+      }
       if (U.pathname == "/api" && rq.method == "POST") {
         const rc = rq.clone();
         try { return await run(rq, env) } catch (e) {
@@ -329,6 +341,30 @@ async function run(rq, env) {
       cs: (await P("SELECT lvl,COUNT(*) n,COALESCE(SUM(amt),0) a FROM cm WHERE u=? AND st='p' GROUP BY lvl", id).all()).results,
       ch: (await P("SELECT lvl,kd,amt,ts FROM cm WHERE u=? AND st='p' ORDER BY id DESC LIMIT 30", id).all()).results
     });
+  }
+  if (a == "pu") {
+    const k = q.k == "st" ? "st" : "sq", d = String(q.d || ""), bad = "The poster could not be saved. Please try again.";
+    if (d.length > 700000 || d.slice(0, 23) != "data:image/jpeg;base64,") return E(bad);
+    const b64 = d.slice(23);
+    if (b64.length < 100 || !/^[A-Za-z0-9+/]+={0,2}$/.test(b64)) return E(bad);
+    let h; try { h = atob(b64.slice(0, 8)) } catch (e) { return E(bad) }
+    if (h.charCodeAt(0) != 255 || h.charCodeAt(1) != 216) return E(bad);
+    const last = await db.prepare("SELECT MAX(ts) t FROM pi WHERE u=?").bind(id).first();
+    if (last && last.t && now - last.t < 3000) return E("Please wait a moment and try again.");
+    const tok = [...crypto.getRandomValues(new Uint8Array(16))].map(x => x.toString(16).padStart(2, "0")).join("");
+    await db.batch([P("DELETE FROM pi WHERE u=? AND k=?", id, k), P("DELETE FROM pi WHERE ts<?", now - 864e5), P("INSERT INTO pi(id,u,k,d,ts,sn) VALUES(?,?,?,?,?,0)", tok, id, k, b64, now)]);
+    return J({ id: tok, url: ORIGIN + "/p/" + tok + ".jpg" });
+  }
+  if (a == "ps") {
+    const tok = String(q.id || "");
+    if (!/^[a-f0-9]{32}$/.test(tok)) return E("Poster not found");
+    const row = await db.prepare("SELECT sn FROM pi WHERE id=? AND u=?").bind(tok, id).first();
+    if (!row) return E("Poster not found");
+    if (now - row.sn < 10000) return E("Please wait a few seconds.");
+    await X("UPDATE pi SET sn=? WHERE id=?", now, tok);
+    const rr = await tg(env, "sendPhoto", { chat_id: id, photo: ORIGIN + "/p/" + tok + ".jpg", caption: "My SPIDER COMMUNITY poster. Join me: https://t.me/" + BOT_USER + "?startapp=r" + id });
+    if (!rr || !rr.ok) return E("Could not send the poster. Open the bot chat, press Start, then try again.");
+    return J({ ok: 1 });
   }
   if (a == "cm") { const has = chs(c.ch).length > 0; return J({ m: has ? !(await chanCheck(env, id, c)) : null }) }
   if (a == "sa" || a == "ud") {
@@ -844,7 +880,7 @@ function buildInvoice(iv) {
   tx(297.5, 366, 13, "F2", DK, "VISION 2037", "c"); tx(297.5, 349, 9, "F1", GR, "Mission: one major action every year  |  progress update every 3 months", "c");
   // disclaimer
   tx(40, 306, 8, "F2", GR, "DISCLAIMER");
-  wrap("Participation in SPC Farm Stock is entirely voluntary and made by your own free choice. Profit is not guaranteed and values may go up or down. Because of technical reasons or any project problem, no person or the project team accepts liability for any profit or loss.", 112).forEach((s, i) => tx(40, 292 - i * 11, 8, "F1", GR, s));
+  wrap("Participation in SPC Farm Stock is entirely voluntary and made by your own free choice. Because of technical reasons or any project problem, no person or the project team accepts liability for any profit or loss.", 112).forEach((s, i) => tx(40, 292 - i * 11, 8, "F1", GR, s));
   tx(40, 235, 11, "F3", MD, "Thank you for being part of SPC Farm.");
   // seal
   circ(500, 240, 40, GD, 1.6); circ(500, 240, 34, GD, 0.6);
@@ -971,7 +1007,7 @@ details[open] summary{margin-bottom:6px}
 .aboutc::before{content:'';position:absolute;top:0;right:0;bottom:0;left:0;background:repeating-conic-gradient(from 0deg at 50% 0,rgba(45,255,160,.12) 0 1deg,transparent 1deg 12deg),repeating-radial-gradient(circle at 50% 0,rgba(45,255,160,.12) 0 1px,transparent 1px 36px);pointer-events:none}
 .aboutc>*{position:relative}
 .aboutc h4{margin:14px 0 4px;color:var(--a)}
-html,body{overflow-x:hidden}
+html,body{overflow-x:hidden}.vcard{width:100%;box-sizing:border-box;min-width:0}
 body{min-height:100dvh}
 img,svg,canvas,video{max-width:100%}
 .c{overflow-wrap:anywhere}
@@ -1008,7 +1044,55 @@ return S.tk.length?'<div class="g">'+S.tk.map(R).join('')+'</div>':'<div class="
 function promo(){const P=[[1,5000,1,500,'visits'],[2,10000,2,1000,'visits'],[3,20000,4,1000,'unique visits']];
 return '<div class="c" data-f><b>🚀 Promote a link</b><p class="m">TikTok, Telegram or any https site. Members earn '+S.c.prw+' 🕷 per visit.</p><input name="url" placeholder="https://..."><select name="p">'+P.map(p=>'<option value="'+p[0]+'">'+p[3]+' '+p[4]+' · '+p[1]+' coins / '+p[2]+' USDT</option>').join('')+'</select><select name="pay"><option value="c">Pay with coins'+(S.lv?' (-'+S.c.disc+'%)':'')+'</option>'+(S.lv>1?'<option value="f">Free monthly (1k visits)</option>':'')+'<option value="u">Pay with USDT (BEP20)</option></select><input name="tx" placeholder="USDT TX hash (USDT only)"><p class="m">USDT address:</p>'+dep(S.c.dep)+'<p class="m">USDT orders are reviewed manually by an admin.</p><button class="b" data-a="pr">Submit</button></div>'}
 let PPX={};
-function popup(){const p=$('pp');if(!p||!S)return;let h='';
+let PO=null;
+function ptext(c,t,x,y,fs,col,al,w,wt){wt=wt||'700';c.font=wt+' '+fs+'px Arial,Helvetica,sans-serif';c.fillStyle=col;c.textAlign=al||'left';const s=String(t);if(w){while(c.measureText(s).width>w&&fs>14){fs-=2;c.font=wt+' '+fs+'px Arial,Helvetica,sans-serif'}}c.fillText(s,x,y)}
+function prect(c,x,y,w,h,r){c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+h,r);c.arcTo(x+w,y+h,x,y+h,r);c.arcTo(x,y+h,x,y,r);c.arcTo(x,y,x+w,y,r);c.closePath()}
+function pweb(c,ox,oy,a0,W){c.strokeStyle='rgba(45,255,160,.2)';c.lineWidth=2;for(let i=0;i<=8;i++){const a=a0+i*Math.PI/16;c.beginPath();c.moveTo(ox,oy);c.lineTo(ox+Math.cos(a)*W*1.3,oy+Math.sin(a)*W*1.3);c.stroke()}
+for(let r=1;r<=8;r++){c.beginPath();for(let i=0;i<=8;i++){const a=a0+i*Math.PI/16,rr=r*W*.12-(i%2?W*.012:0),x=ox+Math.cos(a)*rr,y=oy+Math.sin(a)*rr;if(i==0)c.moveTo(x,y);else c.lineTo(x,y)}c.stroke()}}
+function poster(kind){
+const W=1080,tall=kind=='st',H=tall?1920:1080,m=tall?1.75:1,Y=function(v){return Math.round(v*m)},cv=document.createElement('canvas');cv.width=W;cv.height=H;
+const c=cv.getContext('2d'),u=S.u,lv=S.lv|0,nm=u.n||'Member';
+let g=c.createLinearGradient(0,0,W,H);g.addColorStop(0,'#04140c');g.addColorStop(.55,'#030a06');g.addColorStop(1,'#0a1f14');c.fillStyle=g;c.fillRect(0,0,W,H);
+let rg=c.createRadialGradient(W*.85,H*.08,10,W*.85,H*.08,W*.8);rg.addColorStop(0,'rgba(45,255,160,.3)');rg.addColorStop(1,'rgba(45,255,160,0)');c.fillStyle=rg;c.fillRect(0,0,W,H);
+pweb(c,W,0,Math.PI/2,W);pweb(c,0,H,-Math.PI/2,W);
+ptext(c,'SPIDER COMMUNITY',W/2,Y(120),60,'#f0d27a','center',W-120,'800');
+ptext(c,'PROUD MEMBER',W/2,Y(120)+54,30,'#2dffa0','center');
+let cy=Y(215);
+prect(c,60,cy,960,250,28);c.fillStyle='rgba(255,255,255,.06)';c.fill();c.lineWidth=3;let gb=c.createLinearGradient(60,cy,1020,cy+250);gb.addColorStop(0,'#f6dc8d');gb.addColorStop(1,'#c79a3b');c.strokeStyle=gb;c.stroke();
+let ag=c.createLinearGradient(100,cy+50,240,cy+190);ag.addColorStop(0,'#3ddc97');ag.addColorStop(1,'#0b5c3a');c.beginPath();c.arc(170,cy+125,70,0,Math.PI*2);c.fillStyle=ag;c.fill();c.lineWidth=4;c.strokeStyle='#f0d27a';c.stroke();
+ptext(c,Array.from(nm)[0].toUpperCase(),170,cy+152,76,'#04140c','center');
+ptext(c,nm,270,cy+100,58,'#eafff3','left',480);
+if(u.un)ptext(c,'@'+u.un,270,cy+150,34,'#9fd6b8','left',480,'600');
+if(u.mn)ptext(c,'SPIDER Member #'+u.mn+(u.mn<=1000?'  |  Early Member':''),270,cy+205,30,'#f0d27a','left',700,'700');
+const bt=lv==2?'VVIP':lv==1?'VIP':'MEMBER';let bg=c.createLinearGradient(780,cy+22,1000,cy+78);if(lv==2){bg.addColorStop(0,'#f6dc8d');bg.addColorStop(1,'#c79a3b')}else if(lv==1){bg.addColorStop(0,'#7df0bd');bg.addColorStop(1,'#2dffa0')}else{bg.addColorStop(0,'#5d7a69');bg.addColorStop(1,'#3a4f43')}
+prect(c,790,cy+24,210,54,27);c.fillStyle=bg;c.fill();ptext(c,bt,895,cy+62,30,lv==0?'#eafff3':'#2a1d02','center');
+let by=Y(505);
+ptext(c,'SPC BALANCE',W/2,by,28,'#7aa88f','center');
+ptext(c,fm(u.b),W/2,by+100,100,'#2dffa0','center',940,'800');
+const us=uxs(u.b);if(us)ptext(c,us,W/2,by+160,44,'#f0d27a','center',940,'700');
+let sy=Y(690),bx=[['STOCK FARM',String(S.sk&&S.sk.n||0)+' stocks'],['REFERRALS',String(S.rf|0)],['MINING BOOST','+'+(S.bst|0)+'%']];
+bx.forEach(function(b,i){const x=60+i*330;prect(c,x,sy,300,130,22);c.fillStyle='rgba(255,255,255,.05)';c.fill();c.lineWidth=2;c.strokeStyle='rgba(240,210,122,.45)';c.stroke();ptext(c,b[0],x+150,sy+42,22,'#7aa88f','center',270,'700');ptext(c,b[1],x+150,sy+98,46,'#eafff3','center',270,'800')});
+let vy=Y(840);c.save();c.shadowColor='rgba(240,210,122,.65)';c.shadowBlur=40;let vg=c.createLinearGradient(60,vy,1020,vy+140);vg.addColorStop(0,'#f6dc8d');vg.addColorStop(.5,'#f0d27a');vg.addColorStop(1,'#c79a3b');prect(c,60,vy,960,140,30);c.fillStyle=vg;c.fill();c.restore();
+ptext(c,'VISION 2037 STOCK FARM',W/2,vy+70,62,'#2a1d02','center',900,'800');
+ptext(c,'Grow your stock farm with SPIDER COMMUNITY',W/2,vy+114,26,'#2a1d02','center',900,'600');
+let fy=Y(1010);
+ptext(c,'Join me: t.me/'+S.bot+'?startapp=r'+u.id,W/2,fy,30,'#eafff3','center',960,'700');
+ptext(c,'SPIDER COMMUNITY  \u2022  VISION 2037',W/2,fy+40,22,'#7aa88f','center',960,'600');
+return cv}
+function plink(){return 'https://t.me/'+S.bot+'?startapp=r'+S.u.id}
+function mkposter(){try{PO.src=poster(PO.kind).toDataURL('image/jpeg',.85);PO.tok=null;PO.url=null}catch(e){toast('Could not make the poster');PO=null}popup()}
+async function pupl(){if(PO.tok)return true;const r=await api('pu',{d:PO.src,k:PO.kind});if(!r)return false;PO.tok=r.id;PO.url=r.url;return true}
+async function pact(a){if(!PO||PO.busy)return;PO.busy=1;popup();try{
+if(!(await pupl()))return;
+if(a=='pse'){const r=await api('ps',{id:PO.tok});if(r)toast('Poster sent to your Telegram chat')}
+else if(a=='pst'){let ok=false;try{if(T.shareToStory){T.shareToStory(PO.url,{text:'Proud member of SPIDER COMMUNITY! Join me:',widget_link:{url:plink(),name:'Join SPIDER'}});ok=true}}catch(e){}
+if(!ok){const r=await api('ps',{id:PO.tok});if(r)toast('Story sharing is not supported here. The poster was sent to your chat.')}}
+else{let ok=false;try{if(T.downloadFile&&T.isVersionAtLeast&&T.isVersionAtLeast('8.0')){T.downloadFile({url:PO.url,file_name:'spider-poster.jpg'});ok=true}}catch(e){}
+if(!ok){const r=await api('ps',{id:PO.tok});if(r)toast('Download is not supported here. The poster was sent to your chat.')}}
+}finally{if(PO){PO.busy=0;popup()}}}
+function posterbox(){const d=PO.busy?' disabled':'';return '<div class="pbox" style="max-width:420px;max-height:92vh;overflow:auto"><b style="color:var(--gd)">Your SPIDER poster</b><div style="margin:10px 0"><img alt="Poster" src="'+PO.src+'" style="width:100%;max-height:46vh;object-fit:contain;border-radius:12px;border:1px solid var(--gd)"></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><button class="b'+(PO.kind=='sq'?' gd':'')+'" data-a="pk" data-k="sq">Square</button><button class="b'+(PO.kind=='st'?' gd':'')+'" data-a="pk" data-k="st">Story</button></div><div style="display:grid;gap:8px;margin-top:10px"><button class="b" data-a="pd"'+d+'>Download</button><button class="b" data-a="pst"'+d+'>Share to Story</button><button class="b" data-a="psc">Share to Chat</button><button class="b" data-a="pse"'+d+'>Send to my chat</button></div><p class="m" style="margin-top:10px">Sharing does not give a reward. Rewards come from real members who join and become active.</p><div style="margin-top:8px"><button class="b bk" data-a="pc">Close</button></div></div>'}
+function posterbtn(){return '<div class="c"><b>Promote Spider Community</b><p class="m">Make your personal poster with your name, badge, balance and referral link. Share it on Telegram, Instagram or Facebook.</p><button class="b" data-a="po">Create my poster</button></div>'}
+function popup(){const p=$('pp');if(!p||!S)return;let h='';if(PO){p.className='on';p.innerHTML=posterbox();return}
 const g=(S.gf||[]).find(function(x){return !PPX['g'+x.id]});
 if(g)h='<div class="pbox"><div class="gift">🎁</div><b style="font-size:20px;color:var(--gd)">Congratulations!</b><div style="margin:4px 0 8px">Your Reward</div><div class="m">'+esc(g.lb)+'</div><div style="font-size:30px;font-weight:800;color:var(--a);margin:8px 0 2px">+'+fk(g.amt)+' SPC</div><div class="m" style="margin-bottom:14px">'+uxs(g.amt)+'</div><button class="b" data-a="gc" data-id="'+g.id+'">Claim reward</button><div class="m" style="margin-top:12px"><a data-a="pl" data-k="g'+g.id+'">Later</a></div></div>';
 else if(S.wn>0&&!PPX.wn)h='<div class="pbox"><div class="gift">🕷️</div><b style="font-size:20px;color:var(--gd)">Welcome to SPIDER COMMUNITY!</b><div class="m" style="margin:6px 0">Your welcome bonus is ready</div><div style="font-size:30px;font-weight:800;color:var(--a);margin:8px 0 2px">+'+fk(S.wn)+' SPC</div><div class="m" style="margin-bottom:14px">'+uxs(S.wn)+'</div><button class="b" data-a="wn">Claim bonus</button><div class="m" style="margin-top:12px"><a data-a="pl" data-k="wn">Later</a></div></div>';
@@ -1024,7 +1108,7 @@ let x='<div class="c" data-f><b>Double Reward event</b><p class="m">'+(on?'ON no
 x+='<div class="c" data-f><b>Daily check-in rewards (SPC)</b>'+[1,2,3,4,5,6,7].map(function(i){return '<div class="r" style="padding:2px 0"><span class="m">Day '+i+'</span><input name="c'+i+'" type="number" step="any" value="'+esc(c['ci'+i])+'" style="max-width:120px"></div>'}).join('')+'<button class="b" data-a="cr">Save rewards</button></div>';
 x+='<div class="c"><b>Gifts</b><p class="m">Give coins from the Users section with a label. The user sees a gift popup and taps Claim.</p>'+(AD.gfx&&AD.gfx.length?AD.gfx.map(function(g){return '<div class="r" style="border-bottom:1px solid var(--ln)"><span>'+esc(g.n||g.u)+' · '+esc(g.lb)+'<br><span class="m">'+new Date(g.ts).toLocaleString()+'</span></span><span style="text-align:right"><b>+'+fk(g.amt)+'</b><br><span class="m">'+(g.st=='c'?'Claimed':'Unclaimed')+'</span></span></div>'}).join(''):'<p class="m">No gifts yet.</p>')+'</div>';
 return x}
-function tasks(){return dblbar()+checkin()+rulebox('rt_t','Task rules')+story()+tl()+promo()}
+function tasks(){return dblbar()+checkin()+posterbtn()+rulebox('rt_t','Task rules')+story()+tl()+promo()}
 let RFD=null,RFT=0;
 function web(){const L=(RFD&&RFD.l)||[],n=Math.min(L.length,24);
 let g='<svg viewBox="0 0 300 300" style="width:100%;max-width:340px;display:block;margin:6px auto">';
@@ -1146,7 +1230,7 @@ function finv(){if(!FI||typeof FI!='object')return '<div class="c m">Loading…<
 return '<div class="c"><b>🧾 Invoices</b><p class="m">Download a branded PDF invoice for every approved stock purchase.</p>'+(FI.iv.length?FI.iv.map(i=>'<div class="r" style="border-top:1px solid var(--ln)"><span><b>'+esc(i.no)+'</b><br><span class="m">'+i.q+' stock · '+fm(i.tot)+' '+esc(i.cu)+' · '+new Date(i.ts).toLocaleDateString()+'</span><br><span class="chp '+i.st+'">'+st[i.st]+'</span></span>'+(i.st=='a'?'<button class="b gd" data-a="inv" data-no="'+esc(i.no)+'">PDF</button>':'')+'</div>').join(''):'<p class="m">No invoices yet.</p>')+'</div><div class="c"><b>Stock activity</b>'+(FI.sl.length?FI.sl.map(x=>'<div class="r" style="border-top:1px solid var(--ln)"><span>'+(K[x.k]||esc(x.k))+(x.n?' · '+esc(x.n):'')+'<br><span class="m">'+new Date(x.ts).toLocaleString()+'</span></span><b class="'+(x.k=='sent'?'pfd':'pfu')+'">'+(x.k=='sent'?'-':'+')+fk(x.q)+'</b></div>').join(''):'<p class="m">No activity yet</p>')+'</div>'}
 function frules(){return '<div class="c"><b>📜 Stock rules</b><div class="rules" style="margin-top:8px">'+(S.c.str?esc(S.c.str):'Rules will be published by the admin.')+'</div></div>'}
 function farm(){const TT=[['m','Market'],['b','Buy'],['s','Send'],['i','Invoices'],['r','Rules']];
-return fhero()+fmy()+'<div class="sg">'+TT.map(t=>'<a data-a="fs" data-s="'+t[0]+'" class="'+(fsub==t[0]?'on':'')+'">'+t[1]+'</a>').join('')+'</div>'+({m:fmarket,b:fbuy,s:fsend,i:finv,r:frules})[fsub]()+'<div class="disc"><b>Disclaimer:</b> SPC Farm Stock is a voluntary community investment. You take part entirely by your own free choice. Profit is not guaranteed and market values can go up or down. Due to technical reasons or any project problem, no individual or the project team is liable for any profit or loss.</div>'}
+return fhero()+fmy()+'<div class="sg">'+TT.map(t=>'<a data-a="fs" data-s="'+t[0]+'" class="'+(fsub==t[0]?'on':'')+'">'+t[1]+'</a>').join('')+'</div>'+({m:fmarket,b:fbuy,s:fsend,i:finv,r:frules})[fsub]()+'<div class="disc"><b>Disclaimer:</b> SPC Farm Stock is a voluntary community investment. You take part entirely by your own free choice. Due to technical reasons or any project problem, no individual or the project team is liable for any profit or loss.</div>'}
 function ld(){if(tab=='w'&&wsub=='h'&&!HI){HI=[];api('hi').then(r=>{if(r){HI=r.h;render()}else HI=null})}else if(tab=='b'&&!BD){BD={lb:[],rm:[]};api('lb').then(r=>{if(r){BD=r;render()}else BD=null})}else if(tab=='f'){if(!FM){FM=1;api('fm').then(r=>{FM=r?r.mk:null;if(r)render()})}if(fsub=='i'&&!FI){FI=1;api('fi').then(r=>{FI=r||null;if(r)render()})}}}
 let LG=null;
 function errlog(){
@@ -1204,6 +1288,11 @@ else if(a=='ud'){api('ud',d).then(function(r){if(!r)return;if(r.us){UL=r.us;UD=n
 else if(a=='udx'){UD=null;render()}
 else if(a=='gn'){GS++;popup()}
 else if(a=='lg'||a=='lc'||a=='lt'){(a=='lt'?api('lt').then(function(){return api('lg')}):api(a)).then(function(r){if(r&&r.lg){LG=r.lg;render()}})}
+else if(a=='po'){PO={kind:'sq'};mkposter()}
+else if(a=='pk'){if(PO){PO.kind=d.k;mkposter()}}
+else if(a=='pc'){PO=null;popup()}
+else if(a=='pd'||a=='pst'||a=='pse'){pact(a)}
+else if(a=='psc'){T.openTelegramLink('https://t.me/share/url?url='+encodeURIComponent(plink())+'&text='+encodeURIComponent('Join SPIDER COMMUNITY and earn SPC coins!'))}
 else if(a=='pl'){PPX[d.k]=1;popup()}
 else if(a=='cp'){try{navigator.clipboard.writeText(d.l).then(()=>toast('Copied ✓'),()=>cpf(d.l))}catch(e){cpf(d.l)}}
 else if(a=='sh')T.openTelegramLink('https://t.me/share/url?url='+encodeURIComponent(d.l)+'&text='+encodeURIComponent('Mine Spider Coin with me!'));
