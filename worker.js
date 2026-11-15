@@ -1116,7 +1116,7 @@ let x='<div class="c" data-f><b>Double Reward event</b><p class="m">'+(on?'ON no
 x+='<div class="c" data-f><b>Daily check-in rewards (SPC)</b>'+[1,2,3,4,5,6,7].map(function(i){return '<div class="r" style="padding:2px 0"><span class="m">Day '+i+'</span><input name="c'+i+'" type="number" step="any" value="'+esc(c['ci'+i])+'" style="max-width:120px"></div>'}).join('')+'<button class="b" data-a="cr">Save rewards</button></div>';
 x+='<div class="c"><b>Gifts</b><p class="m">Give coins from the Users section with a label. The user sees a gift popup and taps Claim.</p>'+(AD.gfx&&AD.gfx.length?AD.gfx.map(function(g){return '<div class="r" style="border-bottom:1px solid var(--ln)"><span>'+esc(g.n||g.u)+' · '+esc(g.lb)+'<br><span class="m">'+new Date(g.ts).toLocaleString()+'</span></span><span style="text-align:right"><b>+'+fk(g.amt)+'</b><br><span class="m">'+(g.st=='c'?'Claimed':'Unclaimed')+'</span></span></div>'}).join(''):'<p class="m">No gifts yet.</p>')+'</div>';
 return x}
-function tasks(){return '<button class="b" data-a="tab" data-t="h" style="margin-bottom:10px;background:#0a1a12">← Home</button>'+dblbar()+rulebox('rt_t','Task rules')+tl()+rulebox('rt_c','Check-in rules')+story()}
+function tasks(){return '<button class="b" data-a="tab" data-t="h" style="margin-bottom:10px;background:#0a1a12">← Home</button>'+dblbar()+checkin()+rulebox('rt_t','Task rules')+tl()+story()}
 let RFD=null,RFT=0;
 function web(){const L=(RFD&&RFD.l)||[],n=Math.min(L.length,24);
 let g='<svg viewBox="0 0 300 300" style="width:100%;max-width:340px;display:block;margin:6px auto">';
