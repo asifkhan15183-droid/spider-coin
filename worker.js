@@ -13,12 +13,13 @@
 // Version 1.8: personal poster (square) and story image, Download / Share to Story / Share to Chat / Send to my chat
 // =====================================================================
 const MAIN_ADMIN = "8825348718", ADMIN_USER = "Spider_Incom", BOT_USER = "SPC_Wallet_bot";
-const FOREVER = 4102444800000, SV = "14", APP_VERSION = "1.8.2";
+const FOREVER = 4102444800000, SV = "15", APP_VERSION = "1.9.0";
 // Supply: 10 billion SPC in total. The community (all user balances) may hold at most 50%.
 const TOTAL_SUPPLY = 1e10, CAP_PCT = 50, COMMUNITY_CAP = TOTAL_SUPPLY * CAP_PCT / 100;
 const CAPMSG = "The reward limit for the community supply is reached. Please try again later.";
 let SUP = { t: 0, v: 0 };
-const DEF = { rate: 10, minc: 5, refrw: 200, secs: 30, prw: 9.23, wd: 0, minw: 1000, ch: "", dep: "", wl: "USDT BEP20 address", vp1: 2, vp2: 10, vc: 1e5, vc2: 5e5, vr: 20, disc: 5, mins: 1000, srw: 100, sm: "", dtr: 15, spc: 25000, spu: 2, stt: 2000000, wbr: 100, wbf: 0, str: "", urt: "0.0001", wbn: 1000, dbl: 1, dbs: 0, dbe: 0, ci1: 10, ci2: 15, ci3: 20, ci4: 25, ci5: 30, ci6: 40, ci7: 100, cp1: 10, cp2: 5, cp3: 2.5,
+const DEF = { rate: 10, minc: 5, refrw: 200, secs: 30, prw: 9.23, wd: 0, minw: 1000, ch: "", dep: "", wl: "USDT BEP20 address", vp1: 2, vp2: 10, vc: 1e5, vc2: 5e5, vr: 20, disc: 5, mins: 1000, srw: 100, sm: "", dtr: 15, spc: 25000, spu: 2, stt: 2000000, wbr: 100, wbf: 0, str: "", urt: "0.0001", wbn: 1000, dbl: 1, dbs: 0, dbe: 0, ci1: 10, ci2: 15, ci3: 20, ci4: 25, ci5: 30, ci6: 40, ci7: 100, cp1: 10, cp2: 5, cp3: 2.5, ade: 1, adb: "", adr: 20, adn: 6, adg: 6, adm: 4, tke: 1, tkb: "", tkm: 10,
+  rt_a: "Tap Watch and watch the full video. The reward is added after each video you finish. After a round of videos there is a break before the next round. You can watch a limited number of rounds per day. If you close the video early or no video is available, there is no reward. Using many accounts or bots will get you blocked.",
   rt_t: "Tap Start Task and open the link. Wait at least 30 seconds, then tap Claim. You can claim each task once per day. Tasks reset at 00:00 UTC.",
   rt_r: "Share your referral link. Your friend must join the Official Channel and start mining or finish one task. Then the referral is Successful and you get the reward once. You also earn lifetime commission when your team buys stock or VIP.",
   rt_w: "Join the Official Channel first. It is needed to send, receive and withdraw SPC. To send, enter a registered Telegram ID or @username. You need enough balance and the minimum amount. You cannot send to yourself. A sent transfer cannot be taken back.",
@@ -29,7 +30,7 @@ const DEF = { rate: 10, minc: 5, refrw: 200, secs: 30, prw: 9.23, wd: 0, minw: 1
   ab_d: "SPIDER COMMUNITY is a growing community. Please read the rules before you use the app.",
   faq: "How do I earn SPC?|Start mining on Home, finish tasks, check in every day and invite friends.\nHow do I invite friends?|Open the Refer tab and share your link. You get a reward when your friend joins the Official Channel and starts mining or finishes a task.\nWhy can I not send SPC?|You must join the Official Channel and have enough balance. The amount must also be above the minimum.\nWhere do I see the USDT value?|It is shown under your balance in the Wallet. The rate can change.\nWhen can I withdraw?|Withdrawal opens when the admin turns it on. Watch the Official Channel for news.",
   sup: "" };
-const NK = ["rate", "minc", "refrw", "secs", "prw", "minw", "vp1", "vp2", "vc", "vc2", "vr", "disc", "mins", "srw", "dtr", "spc", "spu", "stt", "wbr", "wbf", "wbn"];
+const NK = ["rate", "minc", "refrw", "secs", "prw", "minw", "vp1", "vp2", "vc", "vc2", "vr", "disc", "mins", "srw", "dtr", "spc", "spu", "stt", "wbr", "wbf", "wbn", "adr", "adn", "adg", "adm", "tkm"];
 const PL = { 1: { c: 5e3, v: 500, q: 0 }, 2: { c: 1e4, v: 1000, q: 0 }, 3: { c: 2e4, v: 1000, q: 1 } };
 const ADM = new Set(["al", "as", "at", "ae", "ad", "ap", "aw", "ao", "aa", "au", "ab", "ag", "ar", "dv", "cr", "ac", "cf", "rn", "sp", "sq", "so", "sx"]);
 const ROLE = { as: "cfg", at: "tk", ae: "tk", ad: "tk", ap: "tk", aw: "wd", ao: "od", au: "us", ab: "us", ag: "us", ar: "rt", dv: "rw", cr: "rw", ac: "cm", cf: "cm", rn: "ru", sp: "st", sq: "st", so: "st", sx: "main", aa: "main" };
@@ -120,7 +121,7 @@ async function liveCounters(db) {
     const a = await db.prepare("SELECT COUNT(*) m,COALESCE(SUM(ts>=?),0) j FROM u").bind(d0.getTime()).first();
     const sv = await db.prepare("SELECT k,v FROM s WHERE k IN ('_lci','_lct')").all();
     let last = 0, tot = 0; for (const r of sv.results) { if (r.k == "_lci") last = Number(r.v) || 0; else tot = Number(r.v) || 0 }
-    const h = await db.prepare("SELECT (SELECT COALESCE(MAX(id),0) FROM h) mx,COALESCE(SUM(CASE WHEN amt>0 AND k IN ('mc','task','referral','bonus','checkin','gift','story','farm','commission') THEN amt END),0) t FROM h WHERE id>?").bind(last).first();
+    const h = await db.prepare("SELECT (SELECT COALESCE(MAX(id),0) FROM h) mx,COALESCE(SUM(CASE WHEN amt>0 AND k IN ('mc','task','referral','bonus','checkin','gift','story','farm','commission','ad') THEN amt END),0) t FROM h WHERE id>?").bind(last).first();
     tot = Math.round((tot + Number(h.t || 0)) * 1e6) / 1e6;
     await db.batch([db.prepare("INSERT OR REPLACE INTO s(k,v) VALUES('_lci',?)").bind(String(Math.max(last, Number(h.mx) || 0))), db.prepare("INSERT OR REPLACE INTO s(k,v) VALUES('_lct',?)").bind(String(tot))]);
     LCN = { t: n, v: { m: Number(a.m) || 0, j: Number(a.j) || 0, c: tot } };
@@ -172,7 +173,8 @@ async function init(db) {
       db.prepare("INSERT OR IGNORE INTO cp(id,b) VALUES(1,0)"),
       db.prepare("CREATE TABLE IF NOT EXISTS el(id INTEGER PRIMARY KEY AUTOINCREMENT,sig TEXT UNIQUE,src TEXT,act TEXT,u INTEGER DEFAULT 0,msg TEXT,stk TEXT,n INTEGER DEFAULT 1,ts INTEGER,ls INTEGER)"),
       db.prepare("CREATE TABLE IF NOT EXISTS gf(id INTEGER PRIMARY KEY AUTOINCREMENT,u INTEGER,amt REAL,lb TEXT,ts INTEGER,st TEXT DEFAULT 'p',ct INTEGER DEFAULT 0)"),
-      db.prepare("CREATE TABLE IF NOT EXISTS ci(u INTEGER,y TEXT,d INTEGER,amt REAL,ts INTEGER,PRIMARY KEY(u,y))")]);
+      db.prepare("CREATE TABLE IF NOT EXISTS ci(u INTEGER,y TEXT,d INTEGER,amt REAL,ts INTEGER,PRIMARY KEY(u,y))"),
+      db.prepare("CREATE TABLE IF NOT EXISTS ad(u INTEGER PRIMARY KEY,y TEXT DEFAULT '',rd INTEGER DEFAULT 0,n INTEGER DEFAULT 0,bk INTEGER DEFAULT 0,st INTEGER DEFAULT 0,ts INTEGER DEFAULT 0)")]);
     const addCols = async (tbl, list) => {
       const cols = ((await db.prepare("PRAGMA table_info(" + tbl + ")").all()).results || []).map(r => r.name);
       for (const [n, t] of list) if (!cols.includes(n)) { try { await db.prepare("ALTER TABLE " + tbl + " ADD COLUMN " + n + " " + t).run() } catch (e) { } }
@@ -470,7 +472,7 @@ async function run(rq, env) {
       }
       case "rn": {
         const st = [];
-        for (const k of ["rt_t", "rt_r", "rt_w", "rt_c", "rt_s", "ab_m", "ab_v", "ab_d", "faq", "sup"]) {
+        for (const k of ["rt_t", "rt_r", "rt_w", "rt_c", "rt_a", "rt_s", "ab_m", "ab_v", "ab_d", "faq", "sup"]) {
           const v = String(q[k] === undefined ? "" : q[k]).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "").trim().slice(0, k == "faq" ? 3000 : 800);
           if (k == "sup" && v && !/^(@[A-Za-z0-9_]{3,32}|https:[/][/][^ ]{3,200})$/.test(v)) return E("Support link must be @username or start with https://");
           st.push(P("INSERT OR REPLACE INTO s(k,v) VALUES(?,?)", k, v));
@@ -494,6 +496,12 @@ async function run(rq, env) {
         if (q.dep !== undefined) { const v = String(q.dep).trim(); if (v && !/^0x[a-fA-F0-9]{40}$/.test(v)) return E("Invalid deposit address"); o.dep = v }
         if (q.wl !== undefined) o.wl = String(q.wl).slice(0, 60);
         if (q.sm !== undefined) { const v = String(q.sm).trim(); if (v && !/^https:[/][/]/.test(v)) return E("Story image must be https"); o.sm = v.slice(0, 500) }
+        for (const k of ["adn", "adm"]) if (o[k] !== undefined && !(Number.isInteger(o[k]) && o[k] >= 1 && o[k] <= 50)) return E(k == "adn" ? "Videos per round must be a whole number from 1 to 50" : "Rounds per day must be a whole number from 1 to 50");
+        if (o.adg !== undefined && o.adg > 72) return E("The break can be 72 hours at most");
+        if (o.tkm !== undefined && !Number.isInteger(o.tkm)) return E("Task ad views per day must be a whole number");
+        for (const k of ["ade", "tke"]) if (q[k] !== undefined) { if (!["0", "1"].includes(String(q[k]).trim())) return E("On/off must be 0 or 1"); o[k] = +q[k] }
+        if (q.adb !== undefined) { const v = String(q.adb).trim(); if (v && !/^[0-9]{1,12}$/.test(v)) return E("Reward Video block ID must be numbers only"); o.adb = v }
+        if (q.tkb !== undefined) { const v = String(q.tkb).trim(); if (v && !/^task-[0-9]{1,12}$/.test(v)) return E("Task ad block ID must look like task-123"); o.tkb = v }
         const ks = Object.keys(o); if (ks.length) await db.batch(ks.map(k => P("INSERT OR REPLACE INTO s(k,v) VALUES(?,?)", k, String(o[k]))));
         CC.d = null; break;
       }
@@ -802,6 +810,31 @@ async function run(rq, env) {
       if (r[2].meta.changes != 1) return E("You already checked in today");
       await notify(env, id, "\u{1F5D3} Daily check-in Day " + day + ": +" + nf(amt) + " SPC was added to your wallet."); break;
     }
+    case "avs": {
+      if (!(N("ade") == 1) || !/^[0-9]{1,12}$/.test(String(c.adb))) return E("Reward video is not available now");
+      await X("INSERT OR IGNORE INTO ad(u) VALUES(?)", id);
+      const av = await Q("SELECT y,rd,n,bk,st FROM ad WHERE u=?", id), rd0 = av.y == today ? (+av.rd || 0) : 0;
+      if (rd0 >= N("adm")) return E("You reached today's video limit. Come back tomorrow");
+      if (+av.bk > now) return E("The next video is not ready yet");
+      await X("UPDATE ad SET st=?,y=?,rd=? WHERE u=?", now, today, rd0, id); break;
+    }
+    case "avc": {
+      const av = await Q("SELECT y,rd,n,bk,st FROM ad WHERE u=?", id);
+      if (!av || !(+av.st > 0)) return E("Start the video first");
+      const el = now - av.st;
+      if (el < 5000) return E("Please watch the video to the end");
+      if (el > 36e5) { await X("UPDATE ad SET st=0 WHERE u=? AND st=?", id, av.st); return E("This video expired. Please start again") }
+      const rd0 = av.y == today ? (+av.rd || 0) : 0, amt = N("adr");
+      if (rd0 >= N("adm") || +av.bk > now) return E("The next video is not ready yet");
+      const n2 = (+av.n || 0) + 1, fin = n2 >= N("adn"), nn = fin ? 0 : n2, nrd = fin ? rd0 + 1 : rd0, nbk = fin ? now + N("adg") * 36e5 : 0;
+      if (amt > 0 && !(await capOk(db, amt))) return E(CAPMSG);
+      const g = "(SELECT st FROM ad WHERE u=?)=?", gb = [id, av.st];
+      const r = await db.batch([
+        amt > 0 ? HS(id, "ad", amt, "Reward video", g, gb) : P("SELECT 1"),
+        amt > 0 ? P("UPDATE u SET b=ROUND(b+?,6) WHERE id=? AND " + g, amt, id, ...gb) : P("SELECT 1"),
+        P("UPDATE ad SET st=0,y=?,rd=?,n=?,bk=? WHERE u=? AND st=?", today, nrd, nn, nbk, id, av.st)]);
+      if (r[2].meta.changes != 1) return E("This reward was already claimed"); break;
+    }
     default: return E("Unknown action");
   }
   const r = await db.batch([P(SEL, id),
@@ -809,11 +842,13 @@ async function run(rq, env) {
     P("SELECT COUNT(*) n,COALESCE(SUM(st='p'),0) p,COALESCE(SUM(st='s'),0) s,COALESCE(SUM(CASE WHEN st='s' THEN rw END),0) e FROM refs WHERE referrer=?", id),
     P("SELECT n,fr FROM stk WHERE u=?", id),
     P("SELECT COUNT(*) n,COALESCE(SUM(y=?),0) t FROM wb WHERE u=?", today, id),
-    P("SELECT id,amt,lb FROM gf WHERE u=? AND st='p' ORDER BY id LIMIT 5", id)]);
+    P("SELECT id,amt,lb FROM gf WHERE u=? AND st='p' ORDER BY id LIMIT 5", id),
+    P("SELECT y,rd,n,bk,st FROM ad WHERE u=?", id)]);
   u = r[0].results[0]; const l2 = u.vx > Date.now() ? u.vl : 0;
   const yst2 = new Date(Date.now() - 864e5).toISOString().slice(0, 10), alive = u.cd == today || u.cd == yst2, skn = alive ? (+u.cs || 0) : 0, dn = u.cd == today, cnt = !dn && skn >= 7 ? 0 : skn;
+  const a6 = r[6].results[0] || {}, adv = { on: N("ade") == 1 && /^[0-9]{1,12}$/.test(String(c.adb)), rd: a6.y == today ? (+a6.rd || 0) : 0, n: +a6.n || 0, bk: +a6.bk || 0, max: N("adm"), per: N("adn"), rw: N("adr"), gap: N("adg") };
   const ck = { done: dn, n: cnt, nd: dn ? skn : cnt + 1, rw: [1, 2, 3, 4, 5, 6, 7].map(i => N("ci" + i)) };
-  return J({ lc: await liveCounters(db), u: { id: u.id, n: u.n, un: u.un, b: u.b, p: u.p, c: u.c, r: u.r, sl: u.sl, ss: u.ss, mst: u.mst, mn: u.mn, gd: u.gd }, c, tk: r[1].results, rf: r[2].results[0].s, rfs: r[2].results[0], sk: r[3].results[0] || { n: 0, fr: 0 }, wb: { n: r[4].results[0].n, t: r[4].results[0].t, on: u.ts > 0 && Date.now() - u.ts < 6048e5, end: u.ts + 6048e5, rw: N("wbr"), need: N("wbf") }, bot: BOT_USER, now: Date.now(), adm, lv: l2, er: (l2 ? N("vr") : N("rate")) * (1 + Math.min(100, 5 * (+u.rc || 0)) / 100), bst: Math.min(100, 5 * (+u.rc || 0)), gf: r[5].results, wn: u.wc === 0 ? N("wbn") : 0, ck });
+  return J({ lc: await liveCounters(db), u: { id: u.id, n: u.n, un: u.un, b: u.b, p: u.p, c: u.c, r: u.r, sl: u.sl, ss: u.ss, mst: u.mst, mn: u.mn, gd: u.gd }, c, tk: r[1].results, rf: r[2].results[0].s, rfs: r[2].results[0], sk: r[3].results[0] || { n: 0, fr: 0 }, wb: { n: r[4].results[0].n, t: r[4].results[0].t, on: u.ts > 0 && Date.now() - u.ts < 6048e5, end: u.ts + 6048e5, rw: N("wbr"), need: N("wbf") }, bot: BOT_USER, now: Date.now(), adm, lv: l2, er: (l2 ? N("vr") : N("rate")) * (1 + Math.min(100, 5 * (+u.rc || 0)) / 100), bst: Math.min(100, 5 * (+u.rc || 0)), gf: r[5].results, wn: u.wc === 0 ? N("wbn") : 0, ck, ad: adv });
 }
 
 // ---------------------------------------------------------------- invoice PDF (no external libraries)
@@ -905,7 +940,7 @@ function buildInvoice(iv) {
 
 // ---------------------------------------------------------------- frontend
 const HTML = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<script src="https://telegram.org/js/telegram-web-app.js"></script><title>Spider Coin</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script><script src="https://sad.adsgram.ai/js/sad.min.js"></script><title>Spider Coin</title>
 <style>
 :root{--a:#2dffa0;--bg:#030a06;--ln:#143826;--mu:#7aa88f;--rd:#ff5470;--gd:#f0d27a}
 *{box-sizing:border-box;margin:0;-webkit-tap-highlight-color:transparent}
@@ -1017,7 +1052,8 @@ table{display:block;overflow-x:auto;max-width:100%}
 @media(min-width:768px){body{max-width:640px}nav{max-width:640px}}
 @media(min-width:1100px){body{max-width:760px}nav{max-width:760px}}
 @media(max-width:350px){body{padding:0 8px calc(96px + env(safe-area-inset-bottom))}header{margin:0 -8px;padding:0 8px}.b{min-height:40px;font-size:13px;padding:8px 10px}nav a{font-size:10px}.sg a{font-size:11px}.g2{grid-template-columns:1fr}}
-</style></head><body><div id="app"><p class="m" style="padding:40px;text-align:center">Loading…</p></div><div id="ts"></div><div id="pp"></div><nav id="nav"></nav>
+#sh{position:fixed;inset:0;z-index:60;display:none}#sh.on{display:block}#sh .bd{position:absolute;inset:0;background:rgba(0,0,0,.6)}#sh .sb{position:absolute;left:50%;transform:translateX(-50%);bottom:0;width:100%;max-width:480px;max-height:88vh;overflow:auto;box-sizing:border-box;background:linear-gradient(180deg,#0b2217,#06120b);border-top:1px solid var(--gd);border-radius:22px 22px 0 0;padding:16px 16px calc(18px + env(safe-area-inset-bottom));animation:shup .28s ease-out}#sh .sb .c{border:0;background:none;box-shadow:none;padding:0;margin:0}@keyframes shup{from{transform:translate(-50%,100%)}to{transform:translate(-50%,0)}}adsgram-task{display:block;width:100%}
+</style></head><body><div id="app"><p class="m" style="padding:40px;text-align:center">Loading…</p></div><div id="ts"></div><div id="pp"></div><div id="sh"></div><nav id="nav"></nav>
 <script>
 const VER='{{VER}}',GEAR='<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',CLOSE='<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>';
 const T=Telegram.WebApp,$=s=>document.getElementById(s);T.ready();T.expand();try{T.BackButton.onClick(function(){if(tab=='a')AS='';else tab='h';render()})}catch(e){}try{T.setHeaderColor('#070d0a');T.setBackgroundColor('#070d0a')}catch(e){}
@@ -1033,14 +1069,14 @@ const api=async(a,d)=>{try{const r=await(await fetch('/api',{method:'POST',body:
 const act=async(a,d)=>{const b0=S?S.u.b:0,r=await api(a,d);if(!r){[].forEach.call(document.querySelectorAll('.b.busy'),function(x){x.classList.remove('busy')});return}
 if(ADM.indexOf(a)>-1){AD=r;if(r.ex){exportSheet(r.ex);r.ex=null}if(a=='sp'||a=='so')FM=null;if(a=='as'||a=='sq'||a=='ar'||a=='ac'||a=='rn'){await act('me');return}}
 else{S=r;off=r.now-Date.now();if(a!='me')HI=null;if(a=='vo')BD=null;if(['fb','fu','ff','xs'].indexOf(a)>-1){FM=null;FI=null}}
-render();if(S&&S.u.b>b0+1e-9&&['mc','tc','rc','sc','wb','gc','wn','ci'].indexOf(a)>-1){toast('+'+f(S.u.b-b0)+' SPC');try{T.HapticFeedback.notificationOccurred('success')}catch(e){}}else if(OKM[a])toast(OKM[a])};
-const L={wbn:'Welcome bonus SPC (new users)',rate:'Mining SPC / day',minc:'Min claim',refrw:'Referral reward',secs:'Task wait seconds (min 30)',dtr:'Default daily task reward',prw:'Promoted task reward',wd:'Withdraw (1 on, 0 off)',minw:'Min withdraw',ch:'Required channels (@a,@b)',dep:'USDT BEP20 deposit address',wl:'Withdraw address label',vp1:'VIP USDT',vp2:'VVIP USDT',vc:'VIP coin price',vc2:'VVIP coin price',vr:'VIP SPC/day',disc:'VIP promo discount %',mins:'Min send',srw:'Story reward',sm:'Story image URL (https)',spc:'Stock price (SPC coins)',spu:'Stock price (USDT)',stt:'Total stock limit',wbr:'Welcome bonus SPC per day',wbf:'Welcome bonus: referrals needed (0 = none)'};
+render();if(S&&S.u.b>b0+1e-9&&['mc','tc','rc','sc','wb','gc','wn','ci','avc'].indexOf(a)>-1){toast('+'+f(S.u.b-b0)+' SPC');try{T.HapticFeedback.notificationOccurred('success')}catch(e){}}else if(OKM[a])toast(OKM[a])};
+const L={wbn:'Welcome bonus SPC (new users)',rate:'Mining SPC / day',minc:'Min claim',refrw:'Referral reward',secs:'Task wait seconds (min 30)',dtr:'Default daily task reward',prw:'Promoted task reward',wd:'Withdraw (1 on, 0 off)',minw:'Min withdraw',ch:'Required channels (@a,@b)',dep:'USDT BEP20 deposit address',wl:'Withdraw address label',vp1:'VIP USDT',vp2:'VVIP USDT',vc:'VIP coin price',vc2:'VVIP coin price',vr:'VIP SPC/day',disc:'VIP promo discount %',mins:'Min send',srw:'Story reward',sm:'Story image URL (https)',spc:'Stock price (SPC coins)',spu:'Stock price (USDT)',stt:'Total stock limit',wbr:'Welcome bonus SPC per day',wbf:'Welcome bonus: referrals needed (0 = none)',ade:'Reward Video (1 on, 0 off)',adb:'Reward Video block ID (numbers, from Adsgram)',adr:'SPC per video',adn:'Videos per round',adg:'Break after a round (hours)',adm:'Rounds per day',tke:'Task ad (1 on, 0 off)',tkb:'Task ad block ID (task-123)',tkm:'Task ad views per day'};
 function mine(){const u=S.u,m=u.mst;
 return dblbar()+homebal()+'<div class="c mine"><span class="st'+(m?' on':'')+'">'+(m?'<i class="pl"></i>MINING LIVE':'● IDLE')+'</span>'+(S.lv?'<div class="m" style="margin-top:8px">'+bdg(S.lv)+' boost active</div>':'')+'<div class="ringw"><svg class="ring" viewBox="0 0 200 200"><defs><linearGradient id="gr" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2dffa0"/><stop offset="1" stop-color="#f0d27a"/></linearGradient></defs><circle class="rb" cx="100" cy="100" r="88"/><circle class="rf" id="rg" cx="100" cy="100" r="88"/></svg><div class="rin"><div class="coin3">'+CN+'</div><div class="big" id="mn">0.000000</div><span class="m" id="pc">SPC mined</span></div></div><div class="stat3"><div><span>Per day</span><b>'+S.er+'</b></div><div><span>Per hour</span><b>'+(S.er/24).toFixed(2)+'</b></div><div><span>Min claim</span><b>'+S.c.minc+'</b></div></div>'+(m?'<p class="m" style="margin:4px 0">Mining pauses after 24 hours, so claim before that.</p><button class="b" id="cb" data-a="mc" disabled>Claim SPC</button>':'<button class="b" data-a="ms">▶ Start mining</button>')+'</div>'}
 function home(){const nt=S.tk.length,td=S.tk.filter(function(x){return x.dc}).length,m=S.u.mst,
 lk=function(t,ic,ti,su){return '<div class="c" data-a="tab" data-t="'+t+'" style="cursor:pointer"><div class="r" style="padding:0"><span>'+ic+' <b>'+ti+'</b><br><span class="m">'+su+'</span></span><b style="font-size:22px">›</b></div></div>'},
 tl2=function(a,ic,ti,su){return '<div class="c" '+a+' style="margin:0;text-align:center;padding:14px 8px;cursor:pointer"><div style="font-size:26px">'+ic+'</div><b>'+ti+'</b><div class="m">'+su+'</div></div>'};
-return (cmchk(),'')+dblbar()+(CM===false?joinnote():'')+homebal()+lk('m','⛏️','Mining',m?'Live now. Tap to view and claim.':'Idle. Tap to start mining.')+chkc()+wbcc()+lk('r','👥','Invite friends','Earn rewards and commission')+'<div class="g2" style="gap:10px;margin-bottom:12px">'+tl2('data-a="tab" data-t="t"','✅','Tasks',nt?td+' of '+nt+' done':'None now')+tl2('data-a="tab" data-t="b"','🏆','Ranking','Top 100')+tl2('data-a="po"','📣','Promote Spider','Create my poster')+tl2('data-a="tab" data-t="pl"','🚀','Promote a link','Get visits')+'</div>'+livec()+'<p class="m" style="text-align:center">Support @{{AU}}</p>'}
+return (cmchk(),'')+dblbar()+(CM===false?joinnote():'')+homebal()+lk('m','⛏️','Mining',m?'Live now. Tap to view and claim.':'Idle. Tap to start mining.')+chkc()+vidc()+wbcc()+lk('r','👥','Invite friends','Earn rewards and commission')+'<div class="g2" style="gap:10px;margin-bottom:12px">'+tl2('data-a="tab" data-t="t"','✅','Tasks',nt?td+' of '+nt+' done':'None now')+tl2('data-a="tab" data-t="b"','🏆','Ranking','Top 100')+tl2('data-a="po"','📣','Promote Spider','Create my poster')+tl2('data-a="tab" data-t="pl"','🚀','Promote a link','Get visits')+'</div>'+livec()+'<p class="m" style="text-align:center">Support @{{AU}}</p>'}
 function story(){if(!S.c.sm)return '';const u=S.u,n=Date.now()+off,wt=u.sl&&n-u.sl<6048e5,rem=u.ss?Math.ceil(S.c.secs-(n-u.ss)/1e3):0;
 return '<div class="c"><b>Telegram story</b><p class="m">Post a story and earn '+S.c.srw+' SPC, once every 7 days.</p>'+(wt?'<button class="b" disabled>Next in '+Math.ceil((6048e5-(n-u.sl))/864e5)+'d</button>':!u.ss?'<button class="b" data-a="sv">Post story</button>':rem>0?'<button class="b" disabled>⏳ '+rem+'s</button>':'<button class="b" data-a="sc">Claim '+S.c.srw+'</button>')+'</div>'}
 function tl(){const pn=function(u){const h=String(host(u)||'').toLowerCase();return /t[.]me|telegram/.test(h)?['✈️','Telegram']:/tiktok/.test(h)?['🎵','TikTok']:/youtu/.test(h)?['▶️','YouTube']:/facebook|fb[.]com/.test(h)?['📘','Facebook']:/instagram/.test(h)?['📷','Instagram']:/(^|[.])x[.]com|twitter/.test(h)?['✖️','X']:['🌐',h.replace(/^www[.]/,'')||'Website']};
@@ -1116,7 +1152,7 @@ let x='<div class="c" data-f><b>Double Reward event</b><p class="m">'+(on?'ON no
 x+='<div class="c" data-f><b>Daily check-in rewards (SPC)</b>'+[1,2,3,4,5,6,7].map(function(i){return '<div class="r" style="padding:2px 0"><span class="m">Day '+i+'</span><input name="c'+i+'" type="number" step="any" value="'+esc(c['ci'+i])+'" style="max-width:120px"></div>'}).join('')+'<button class="b" data-a="cr">Save rewards</button></div>';
 x+='<div class="c"><b>Gifts</b><p class="m">Give coins from the Users section with a label. The user sees a gift popup and taps Claim.</p>'+(AD.gfx&&AD.gfx.length?AD.gfx.map(function(g){return '<div class="r" style="border-bottom:1px solid var(--ln)"><span>'+esc(g.n||g.u)+' · '+esc(g.lb)+'<br><span class="m">'+new Date(g.ts).toLocaleString()+'</span></span><span style="text-align:right"><b>+'+fk(g.amt)+'</b><br><span class="m">'+(g.st=='c'?'Claimed':'Unclaimed')+'</span></span></div>'}).join(''):'<p class="m">No gifts yet.</p>')+'</div>';
 return x}
-function tasks(){return '<button class="b" data-a="tab" data-t="h" style="margin-bottom:10px;background:#0a1a12">← Home</button>'+dblbar()+checkin()+rulebox('rt_t','Task rules')+tl()+story()}
+function tasks(){return '<button class="b" data-a="tab" data-t="h" style="margin-bottom:10px;background:#0a1a12">← Home</button>'+dblbar()+rulebox('rt_t','Task rules')+'<div id="tkslot"></div><div id="tlw">'+tl()+story()+'</div>'}
 let RFD=null,RFT=0;
 function web(){const L=(RFD&&RFD.l)||[],n=Math.min(L.length,24);
 let g='<svg viewBox="0 0 300 300" style="width:100%;max-width:340px;display:block;margin:6px auto">';
@@ -1192,8 +1228,31 @@ if(CM===true)return '';
 return '<div class="c" style="border-color:var(--gd)"><b>Become a Verified Member</b><p class="m">Join the Official Channel to become a Verified Member. Verified members can send, receive and withdraw SPC.</p>'+hs.map(h=>'<button class="b" data-a="ol" data-l="https://t.me/'+esc(h.replace('@',''))+'">Join '+esc(h)+'</button>').join('')+'<p class="m">After joining, open this page again.</p></div>'}
 let GS=0,GH=0,GR=0,CJ=0,TM=0,RISK=0;
 const SB='padding:8px 12px;min-width:96px;font-size:13px';
+function hms(r){const t=Math.max(0,Math.ceil(r/1e3));return String(Math.floor(t/3600)).padStart(2,'0')+':'+String(Math.floor(t%3600/60)).padStart(2,'0')+':'+String(t%60).padStart(2,'0')}
+let CIS=0,VB=0,VC=null,VK='',TKE=null,TKB='';
 function chkc(){const k=S.ck;if(!k)return '';let d='';for(let i=1;i<=7;i++){const dn=i<=k.n,cur=!k.done&&i==k.nd;d+='<i style="width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:5px;background:'+(dn?'var(--a)':'transparent')+';border:1px solid '+(cur?'var(--gd)':dn?'var(--a)':'var(--ln)')+'"></i>'}
-return '<div class="c" style="padding:12px 14px"><div class="r" style="padding:0"><span>📅 <b>Daily check-in</b><br><span class="m">Streak '+k.n+' &nbsp;'+d+'</span></span>'+(k.done?'<button class="b" disabled style="'+SB+'">Done ✓</button>':'<button class="b" data-a="ci" style="'+SB+'">+'+fk(k.rw[k.nd-1])+' SPC</button>')+'</div></div>'}
+return '<div class="c" data-a="cio" style="padding:12px 14px;cursor:pointer"><div class="r" style="padding:0"><span>📅 <b>Daily check-in</b><br><span class="m">Streak '+k.n+' &nbsp;'+d+'</span><br><span class="m">'+(k.done?'Checked in today ✓':'Today: Day '+k.nd+' · +'+fk(k.rw[k.nd-1])+' SPC')+'</span></span><b style="font-size:22px">›</b></div></div>'}
+function shsync(){const e=$('sh');if(!e)return;if(CIS&&S&&S.ck){if(e.className=='on'&&$('shc')){$('shc').innerHTML=checkin();return}e.className='on';e.innerHTML='<div class="bd" data-a="cic"></div><div class="sb"><div class="r" style="padding:0 0 8px"><b style="font-size:18px">📅 Daily Check-in</b><a data-a="cic" style="font-size:22px;padding:4px 8px;cursor:pointer">✕</a></div><div id="shc">'+checkin()+'</div></div>'}else{e.className='';e.innerHTML=''}}
+function vidc(){const v=S.ad;if(!v||!v.on)return '';const n=Date.now()+off;let b,s;
+if(v.rd>=v.max){s='Today: '+v.max+' of '+v.max+' rounds done. Come back tomorrow.';b='<button class="b" disabled style="'+SB+'">Done ✓</button>'}
+else if(v.bk>n){s='Round '+v.rd+' of '+v.max+' done. Next round in <b id="vct">'+hms(v.bk-n)+'</b>';b='<button class="b" disabled style="'+SB+'">⏳ Wait</button>'}
+else{s='Round '+(v.rd+1)+' of '+v.max+' · Video '+(v.n+1)+' of '+v.per;b='<button class="b gd" data-a="vw" style="'+SB+'">▶ +'+fk(v.rw)+' SPC</button>'}
+return '<div class="c" style="padding:12px 14px"><div class="r" style="padding:0"><span>🎬 <b>Reward Video</b><br><span class="m">Watch and earn '+fk(v.rw)+' SPC per video</span><br><span class="m">'+s+'</span></span>'+b+'</div>'+rulebox('rt_a','Reward video rules')+'</div>'}
+async function vplay(){if(VB||!S||!S.ad||!S.ad.on)return;if(!window.Adsgram){toast('Videos are not available now');return}
+VB=1;try{if(!VC||VK!==S.c.adb){VC=window.Adsgram.init({blockId:String(S.c.adb)});VK=S.c.adb}
+const r=await api('avs');if(!r){VB=0;render();return}S=r;off=r.now-Date.now();HI=null;
+let res=null;try{res=await VC.show()}catch(er){res=er}
+if(res&&res.done===true)await act('avc');else toast('Watch the whole video to get your reward')}catch(e){toast('No video is available now. Try again later')}
+VB=0;[].forEach.call(document.querySelectorAll('.b.busy'),function(x){x.classList.remove('busy')});render()}
+function tkmount(){const sl=$('tkslot');if(!sl||!S)return;const c=S.c;if(+c.tke!==1||!/^task-[0-9]{1,12}$/.test(String(c.tkb||'')))return;
+if(!TKE||TKB!==c.tkb){const k='tkad_'+new Date(Date.now()+off).toISOString().slice(0,10);let n=0;try{n=+localStorage.getItem(k)||0}catch(e){}
+if(n>=(+c.tkm||0))return;try{localStorage.setItem(k,String(n+1))}catch(e){}
+TKE=document.createElement('div');TKE.className='c';TKE.innerHTML='<div class="m" style="font-size:11px;margin-bottom:6px">Sponsored</div>';
+const el=document.createElement('adsgram-task');el.setAttribute('data-block-id',c.tkb);el.setAttribute('data-debug','false');el.className='task';
+['onBannerNotFound','onError','onTooLongSession','bannerNotFound','error'].forEach(function(ev){el.addEventListener(ev,function(){if(TKE)TKE.style.display='none'})});
+TKE.appendChild(el);TKB=c.tkb}
+sl.appendChild(TKE)}
+setInterval(function(){const e=$('vct');if(!e||!S||!S.ad)return;const r=S.ad.bk-(Date.now()+off);if(r<=0){render();return}e.textContent=hms(r)},1000);
 function wbcc(){const w=S.wb;if(!w||!w.on||w.n>=7)return '';const dn=Math.min(7,w.n+(w.t?0:1));return '<div class="c" style="padding:12px 14px"><div class="r" style="padding:0"><span>🎁 <b>Welcome bonus</b><br><span class="m">Day '+dn+' of 7'+(w.need>0?' · needs '+w.need+' verified referrals':'')+'</span></span>'+(w.t?'<button class="b" disabled style="'+SB+'">Claimed ✓</button>':'<button class="b gd" data-a="wb" style="'+SB+'">+'+fk(w.rw)+' SPC</button>')+'</div></div>'}
 function ftt(q){const c=S.c;return 'Total: <b>'+fm(q*+c.spc)+' SPC</b> or <b>'+(Math.round(q*+c.spu*100)/100)+' USDT</b>'}
 function usdtbox(a,n){return '<p class="m">Pay in USDT on the <b>BEP20 network only</b>. Send the exact amount to:</p>'+dep(a)+'<input name="tx" placeholder="USDT TX hash (0x...)"><p class="m">'+(n||'Paste your TX hash after paying. An admin reviews it manually.')+'</p>'}
@@ -1210,9 +1269,9 @@ function about(){const c=S.c;return backbtn()+'<div class="c aboutc"><b style="f
 function suplink(){const s=String((S.c&&S.c.sup)||'').trim();return s.charAt(0)=='@'?'https://t.me/'+s.slice(1):s}
 function help(){const q=String(S.c.faq||'').split(String.fromCharCode(10)).filter(Boolean).map(function(l){const i=l.indexOf('|');return [(i<0?l:l.slice(0,i)).trim(),i<0?'':l.slice(i+1).trim()]});
 return backbtn()+'<div class="c"><b>Help Center</b><p class="m">Tap a question to see the answer.</p>'+q.map(function(x){return '<details class="fq"><summary>'+esc(x[0])+'</summary><p class="m">'+esc(x[1])+'</p></details>'}).join('')+'</div>'+(suplink()?'<div class="c"><b>Need more help?</b><p class="m">Our support team can help you.</p><button class="b" data-a="ol" data-l="'+esc(suplink())+'">Contact Support</button></div>':'')}
-function rulesadm(){const c=AD.c,F=[['rt_t','Task rules'],['rt_r','Referral rules'],['rt_w','Send and receive rules'],['rt_c','Check-in rules'],['rt_s','Stock and VIP/VVIP rules'],['ab_m','About: Mission'],['ab_v','About: Vision'],['ab_d','About: Important notice'],['faq','Help Center questions (one per line: Question | Answer)']];
+function rulesadm(){const c=AD.c,F=[['rt_t','Task rules'],['rt_r','Referral rules'],['rt_w','Send and receive rules'],['rt_c','Check-in rules'],['rt_a','Reward video rules'],['rt_s','Stock and VIP/VVIP rules'],['ab_m','About: Mission'],['ab_v','About: Vision'],['ab_d','About: Important notice'],['faq','Help Center questions (one per line: Question | Answer)']];
 return '<div class="c" data-f><b>Rules and content</b><p class="m">Users see these texts in the app. Keep them short and simple. Use a new line for a new rule.</p>'+F.map(function(f){return '<div class="m" style="margin-top:8px">'+f[1]+'</div><textarea name="'+f[0]+'" rows="'+(f[0]=='faq'?7:3)+'">'+esc(c[f[0]])+'</textarea>'}).join('')+'<div class="m" style="margin-top:8px">Support link (@username or https:// link)</div><input name="sup" value="'+esc(c.sup)+'" placeholder="@support_username"><button class="b" data-a="rn" style="margin-top:10px">Save</button></div>'}
-function wallet(){const u=S.u,v=S.lv,K={mc:'Mining',task:'Task',referral:'Referral',sent:'Sent',received:'Received',promo:'Promo',vip:'VIP',withdraw:'Withdraw',commission:'Commission',refund:'Refund',story:'Story',admin:'Admin',stock:'Stock',farm:'Farm profit',bonus:'Welcome bonus',gift:'Gift',checkin:'Daily check-in'};
+function wallet(){const u=S.u,v=S.lv,K={mc:'Mining',task:'Task',referral:'Referral',sent:'Sent',received:'Received',promo:'Promo',vip:'VIP',withdraw:'Withdraw',commission:'Commission',refund:'Refund',story:'Story',admin:'Admin',stock:'Stock',farm:'Farm profit',bonus:'Welcome bonus',gift:'Gift',checkin:'Daily check-in',ad:'Reward video'};
 let x=card()+'<div class="sg">'+[['s','Send'],['w','Withdraw'],['v','VIP'],['h','History']].map(t=>'<a data-a="ws" data-s="'+t[0]+'" class="'+(wsub==t[0]?'on':'')+'">'+t[1]+'</a>').join('')+'</div>';
 if(wsub=='s'){x+=joinnote()+rulebox('rt_w','Send and receive rules');
 x+='<div class="c"><b>Your ID</b><div class="r"><span style="font-family:ui-monospace,monospace;font-size:18px;color:var(--a)">'+u.id+(u.un?'<br><span class="m">@'+esc(u.un)+'</span>':'')+'</span><button class="b" data-a="cp" data-l="'+u.id+'">Copy ID</button></div><p class="m">Share your ID so others can send you SPC.</p></div>';
@@ -1274,7 +1333,7 @@ const cks=sel=>RL.map(r=>'<label class="ck"><input type="checkbox" value="'+r[0]
 let x='<div class="c"><b>🛠 Admin</b> <span class="m">App v'+VER+' · Users: '+AD.n+' · '+(AD.im?'Main Admin':'Roles: '+AD.rl.join(', '))+'</span></div>';
 x='<div class="adm">'+x;if(!AS){const M=[['rq','Requests',(has('wd')?AD.w.length:0)+(has('od')?AD.od.length:0)+(has('st')?AD.so.length:0)+(has('tk')?AD.tk.filter(function(k){return k.o&&k.st=='p'}).length:0),has('wd')||has('od')||has('st')||has('tk')],['us','Users',0,has('us')||has('sa')],['tr','Tasks and Rewards',0,has('tk')||has('rw')],['st','Stock',0,has('st')],['cf','Settings and Rates',0,has('cfg')||has('rt')||has('cm')],['ct','Content and Rules',0,has('ru')||has('st')],['sy','System',0,AD.im||has('lg')]];return x+'<div class="g2">'+M.filter(function(m){return m[3]}).map(function(m){return '<button class="b" data-a="am" data-s="'+m[0]+'">'+m[1]+(m[2]?'<i class="ab">'+m[2]+'</i>':'')+'</button>'}).join('')+'</div></div>'}
 x+='<button class="b bk" data-a="am" data-s="">&larr; Admin menu</button>';
-if(has('cfg')&&AS=='cf')x+='<div class="c" data-f><b style="display:block;margin-bottom:6px">Settings</b>'+[['Mining and referral',['rate','minc','refrw','wbn','wbr','wbf']],['Tasks and story',['secs','dtr','prw','srw','sm']],['Wallet and withdraw',['wd','minw','mins','dep','wl','ch']],['VIP',['vp1','vp2','vc','vc2','vr','disc']],['Stock',['spc','spu','stt']]].map(g=>'<b class="gh">'+g[0]+'</b>'+g[1].map(k=>'<span class="m">'+L[k]+'</span><input name="'+k+'" value="'+esc(AD.c[k])+'">').join('')).join('')+'<button class="b" data-a="as">Save</button></div>';
+if(has('cfg')&&AS=='cf')x+='<div class="c" data-f><b style="display:block;margin-bottom:6px">Settings</b>'+[['Mining and referral',['rate','minc','refrw','wbn','wbr','wbf']],['Tasks and story',['secs','dtr','prw','srw','sm']],['Wallet and withdraw',['wd','minw','mins','dep','wl','ch']],['VIP',['vp1','vp2','vc','vc2','vr','disc']],['Stock',['spc','spu','stt']],['Reward Video ads',['ade','adb','adr','adn','adg','adm']],['Task ad (above task list)',['tke','tkb','tkm']]].map(g=>'<b class="gh">'+g[0]+'</b>'+g[1].map(k=>'<span class="m">'+L[k]+'</span><input name="'+k+'" value="'+esc(AD.c[k])+'">').join('')).join('')+'<button class="b" data-a="as">Save</button></div>';
 if(has('tk')){if(AS=='tr')x+='<div class="c"><b>Daily tasks (max 10)</b>'+AD.tk.filter(k=>!k.o&&k.st=='a').map(k=>'<div data-f style="border-bottom:1px solid var(--ln);padding:6px 0"><input name="url" value="'+esc(k.url)+'"><input name="bl" maxlength="24" placeholder="Button label (e.g. Visit Channel)" value="'+esc(k.bl||'')+'"><input name="rw" type="number" step="any" value="'+k.rw+'"><div class="g"><button class="b" data-a="ae" data-id="'+k.id+'">Save</button>'+bt('ad',k.id,'','Delete',1)+'</div></div>').join('')+'<div data-f><input name="url" placeholder="https://..."><input name="bl" maxlength="24" placeholder="Button label (e.g. Visit Channel)"><input name="rw" type="number" step="any" placeholder="Reward (default '+esc(AD.c.dtr)+')"><button class="b" data-a="at">Add task</button></div></div>';
 if(AS=='rq')x+='<div class="c"><b>Promo orders</b>'+AD.tk.filter(k=>k.o).sort(function(a,b){return (b.st=='p'?1:0)-(a.st=='p'?1:0)}).map(k=>'<div class="r"><span>'+esc(k.url)+'<br><span class="m">owner '+k.o+' · left '+k.l+(k.st=='p'?' · '+esc(k.x):'')+'</span></span>'+(k.st=='p'?bt('ap',k.id,'1','✓')+bt('ap',k.id,'','✕',1):bt('ad',k.id,'','✕',1))+'</div>').join('')+'</div>'}
 if(has('od')&&AS=='rq')x+='<div class="c"><b>VIP orders</b>'+AD.od.map(o=>'<div class="r"><span>'+o.u+' · '+o.k+'<br><span class="m">'+esc(o.tx)+'</span></span>'+bt('ao',o.id,'1','✓')+bt('ao',o.id,'','✕',1)+'</div>').join('')+'</div>';
@@ -1297,12 +1356,12 @@ $('app').innerHTML='<header><div class="av">'+esc(Array.from(u.n||'?')[0])+'</di
 const IC={f:'<path d="M12 21v-9M12 12c-4 0-6-2-6-6 4 0 6 2 6 6zM12 14c0-4 2-6 6-6 0 4-2 6-6 6z"/>',h:'<path d="M3 11l9-8 9 8M5 10v10h14V10"/>',m:'<path d="M13 2L4 14h7l-1 8 9-12h-7z"/>',t:'<circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/>',r:'<circle cx="10" cy="8" r="3.5"/><path d="M3.5 20v-1a4 4 0 014-4h5a4 4 0 014 4v1"/>',b:'<path d="M5 20V10M12 20V4M19 20v-7"/>',w:'<rect x="3" y="6" width="18" height="13" rx="3"/><path d="M16 13h2"/>',a:'<circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/>'};
 const tb=[['h','Home'],['m','Mining'],['f','Farm'],['r','Refer'],['w','Wallet']];
 $('nav').innerHTML=tb.map(t=>'<a data-a="tab" data-t="'+t[0]+'" class="'+((tab==t[0]||(t[0]=='h'&&(tab=='t'||tab=='b'||tab=='pl')))?'on':'')+(dotf(t[0])?' dot':'')+'"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">'+IC[t[0]]+'</svg>'+t[1]+'</a>').join('');
-const bl=$('bal');if(bl){if(pb!==null&&pb!=u.b){const a0=+pb,t0=performance.now(),to=+u.b,st=t=>{const k=Math.min(1,(t-t0)/600);bl.textContent=f(a0+(to-a0)*k);if(k<1)requestAnimationFrame(st)};requestAnimationFrame(st)}pb=u.b}ld();popup();window.scrollTo(0,sm?sy:0);try{if(tab=='ab'||tab=='hp'||tab=='t'||tab=='b'||tab=='pl'||(tab=='a'&&AS))T.BackButton.show();else T.BackButton.hide()}catch(e){}}
+const bl=$('bal');if(bl){if(pb!==null&&pb!=u.b){const a0=+pb,t0=performance.now(),to=+u.b,st=t=>{const k=Math.min(1,(t-t0)/600);bl.textContent=f(a0+(to-a0)*k);if(k<1)requestAnimationFrame(st)};requestAnimationFrame(st)}pb=u.b}ld();popup();shsync();tkmount();window.scrollTo(0,sm?sy:0);try{if(tab=='ab'||tab=='hp'||tab=='t'||tab=='b'||tab=='pl'||(tab=='a'&&AS))T.BackButton.show();else T.BackButton.hide()}catch(e){}}
 document.onclick=e=>{const b=e.target.closest('[data-a]');if(!b)return;if(b.tagName=='BUTTON'){if(b.classList.contains('busy'))return;b.classList.add('busy');setTimeout(function(){b.classList.remove('busy')},6000)}try{T.HapticFeedback.impactOccurred('light')}catch(e){}const d=Object.assign({},b.dataset),a=d.a,F=b.closest('[data-f]');
 if(F)F.querySelectorAll('input,select,textarea').forEach(i=>{if(i.name)d[i.name]=i.value});
 if(a=='dv'&&d.stop!='1'){d.s=new Date(d.s).getTime()||0;d.e=new Date(d.e).getTime()||0}
 if(a=='aa'&&F)d.rl=[].slice.call(F.querySelectorAll('input[type=checkbox]:checked')).map(i=>i.value).join(',');
-if(a=='tab'){tab=d.t;if(tab=='a')AS='';render();const p=$('app');p.classList.remove('fi');void p.offsetWidth;p.classList.add('fi')}
+if(a=='tab'){tab=d.t;CIS=0;if(tab=='a')AS='';render();const p=$('app');p.classList.remove('fi');void p.offsetWidth;p.classList.add('fi')}
 else if(a=='v'){const l=d.url;if(l.indexOf('t.me/')>-1)T.openTelegramLink(l);else T.openLink(l);act('ts',{t:d.t})}
 else if(a=='sv'){try{T.shareToStory(S.c.sm,{text:'Mine Spider Coin with me!',widget_link:{url:'https://t.me/'+S.bot+'?startapp=r'+S.u.id,name:'Spider Coin'}})}catch(e){}act('ss')}
 else if(a=='sa'){api('sa').then(function(r){if(r){ST=r;render()}})}
@@ -1315,12 +1374,13 @@ else if(a=='pk'){if(PO){PO.kind=d.k;mkposter()}}
 else if(a=='pc'){PO=null;popup()}
 else if(a=='pd'||a=='pst'||a=='pse'){pact(a)}
 else if(a=='psc'){T.openTelegramLink('https://t.me/share/url?url='+encodeURIComponent(plink())+'&text='+encodeURIComponent('Join SPIDER COMMUNITY and earn SPC coins!'))}
+else if(a=='cio'){CIS=1;shsync()}else if(a=='cic'){CIS=0;shsync()}else if(a=='vw'){vplay()}
 else if(a=='pl'){PPX[d.k]=1;popup()}
 else if(a=='cp'){try{navigator.clipboard.writeText(d.l).then(()=>toast('Copied ✓'),()=>cpf(d.l))}catch(e){cpf(d.l)}}
 else if(a=='sh')T.openTelegramLink('https://t.me/share/url?url='+encodeURIComponent(d.l)+'&text='+encodeURIComponent('Mine Spider Coin with me!'));
 else if(a=='ol')T.openTelegramLink(d.l);else if(a=='ws'){wsub=d.s;render()}else if(a=='fs'){fsub=d.s;render()}else if(a=='inv'){const url=location.origin+'/invoice?i='+encodeURIComponent(T.initData)+'&n='+encodeURIComponent(d.no);try{if(T.downloadFile&&T.isVersionAtLeast&&T.isVersionAtLeast('8.0'))T.downloadFile({url:url,file_name:d.no+'.pdf'});else T.openLink(url)}catch(e){T.openLink(url)}}else if(a=='sp'){const go=()=>act('sp',d);if(T.showConfirm)T.showConfirm('Post this entry? A profit entry pays coins to all stock holders immediately and cannot be undone.',ok=>{if(ok)go()});else go()}else if((a=='fb'||a=='fu')&&!RISK&&T.showConfirm)T.showConfirm('SPC Farm Stock is a voluntary community investment. Profit is not guaranteed and you can lose value. Continue?',function(ok){if(ok){RISK=1;act(a,d)}});else if(['aw','ao','so','ap'].indexOf(a)>-1&&d.ok=='1'&&T.showConfirm)T.showConfirm('Approve this request? This cannot be undone.',function(ok){if(ok)act(a,d)});else act(a,d)};
 setInterval(()=>{const m=$('mn');if(m&&S){const u=S.u,v=u.mst?Math.min(Date.now()+off-u.mst,864e5)*S.er/864e5:0;m.textContent=v.toFixed(6);const b=$('cb');if(b)b.disabled=v<+S.c.minc;const p=Math.min(1,v/+S.c.minc),g=$('rg');if(g)g.style.strokeDashoffset=553*(1-p);const pc=$('pc');if(pc)pc.textContent=u.mst?Math.floor(p*100)+'% to claim':'SPC mined'}},100);
-setInterval(()=>{const ae=document.activeElement;if(ae&&/^(INPUT|SELECT|TEXTAREA)$/.test(ae.tagName))return;if(S&&tab=='t'&&(S.tk.some(k=>k.s&&!k.dc&&Date.now()+off-k.s<S.c.secs*1e3+1e3)||S.u.ss&&Date.now()+off-S.u.ss<S.c.secs*1e3+1e3))render()},1000);
+setInterval(()=>{const ae=document.activeElement;if(ae&&/^(INPUT|SELECT|TEXTAREA)$/.test(ae.tagName))return;if(S&&tab=='t'&&(S.tk.some(k=>k.s&&!k.dc&&Date.now()+off-k.s<S.c.secs*1e3+1e3)||S.u.ss&&Date.now()+off-S.u.ss<S.c.secs*1e3+1e3)){const w=$('tlw');if(w)w.innerHTML=tl()+story();else render()}},1000);
 let CE=0;
 function rep(m,l,c,st){if(CE>=5||!T.initData)return;CE++;try{fetch('/api',{method:'POST',body:JSON.stringify({i:T.initData,a:'ce',m:String(m||'').slice(0,300),l:l|0,c:c|0,st:String(st||'').slice(0,700),t:tab})}).catch(function(){})}catch(e){}}
 window.addEventListener('error',function(e){if(e.filename&&e.filename.indexOf(location.origin)!==0)return;rep(e.message,e.lineno,e.colno,e.error&&e.error.stack)});
