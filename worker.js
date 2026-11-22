@@ -1,0 +1,1433 @@
+// =====================================================================
+// SPIDER COIN (SPC) - Telegram Mini App
+// Single-file Cloudflare Worker (frontend + backend) + D1 database
+// Bindings: D1 "DB" | Secrets: BOT_TOKEN, WEBHOOK_SECRET | Optional var: ADMIN_ID
+// Version 1.1: Error Logs, Admin button at the top, tab names (Home, Ranking)
+// Version 1.2: SPC to USDT rate (admin), USDT shown beside SPC, rate saved in history, community supply cap
+// Version 1.2.1: header balance pill removed, rate card replaced by one line, bigger USDT line on the card
+// Version 1.3: server-enforced 30s task timer, custom task button labels, Official Channel check for send and withdraw
+// Version 1.5: gift box (admin gifts with a label), welcome bonus popup, Double Reward event, 7-day check-in
+// Version 1.4: referral Pending/Successful, new startapp link, referral boost, 3-level commission (pool), Spider Web
+// Version 1.6: bot notifications, live counters, admin stats and member details, member number, last active
+// Version 1.7: new button look, responsive layout, editable rules and notes, first-time guide, About and Help Center
+// Version 1.8: personal poster (square) and story image, Download / Share to Story / Share to Chat / Send to my chat
+// =====================================================================
+const MAIN_ADMIN = "8825348718", ADMIN_USER = "Spider_Incom", BOT_USER = "SPC_Wallet_bot";
+const FOREVER = 4102444800000, SV = "15", APP_VERSION = "2.0.0";
+// Supply: 10 billion SPC in total. The community (all user balances) may hold at most 50%.
+const TOTAL_SUPPLY = 1e10, CAP_PCT = 50, COMMUNITY_CAP = TOTAL_SUPPLY * CAP_PCT / 100;
+const CAPMSG = "The reward limit for the community supply is reached. Please try again later.";
+let SUP = { t: 0, v: 0 };
+const DEF = { rate: 10, minc: 5, refrw: 200, secs: 30, prw: 9.23, wd: 0, minw: 1000, ch: "", dep: "", wl: "USDT BEP20 address", vp1: 2, vp2: 10, vc: 1e5, vc2: 5e5, vr: 20, disc: 5, mins: 1000, srw: 100, sm: "", dtr: 15, spc: 25000, spu: 2, stt: 2000000, wbr: 100, wbf: 0, str: "", urt: "0.0001", wbn: 1000, dbl: 1, dbs: 0, dbe: 0, ci1: 10, ci2: 15, ci3: 20, ci4: 25, ci5: 30, ci6: 40, ci7: 100, cp1: 10, cp2: 5, cp3: 2.5, ade: 1, adb: "", adr: 20, adn: 6, adg: 6, adm: 4, tke: 1, tkb: "", tkm: 10,
+  rt_a: "Tap Watch and watch the full video. The reward is added after each video you finish. After a round of videos there is a break before the next round. You can watch a limited number of rounds per day. If you close the video early or no video is available, there is no reward. Using many accounts or bots will get you blocked.",
+  rt_t: "Tap Start Task and open the link. Wait at least 30 seconds, then tap Claim. You can claim each task once per day. Tasks reset at 00:00 UTC.",
+  rt_r: "Share your referral link. Your friend must join the Official Channel and start mining or finish one task. Then the referral is Successful and you get the reward once. You also earn lifetime commission when your team buys stock or VIP.",
+  rt_w: "Join the Official Channel first. It is needed to send, receive and withdraw SPC. To send, enter a registered Telegram ID or @username. You need enough balance and the minimum amount. You cannot send to yourself. A sent transfer cannot be taken back.",
+  rt_c: "You can check in once per day. The reward grows from Day 1 to Day 7. If you miss a day, you start again at Day 1. After Day 7 you start again at Day 1. The day changes at 00:00 UTC.",
+  rt_s: "Stock and VIP/VVIP can be bought with SPC or USDT. USDT payments are checked by the admin before they become active. Please read the rules before you buy.",
+  ab_m: "Our mission is to build a friendly community where everyone can learn, earn and grow together.",
+  ab_v: "Vision 2037: a strong and open Spider community with a Stock Farm that grows with its members.",
+  ab_d: "SPIDER COMMUNITY is a growing community. Please read the rules before you use the app.",
+  faq: "How do I earn SPC?|Start mining on Home, finish tasks, check in every day and invite friends.\nHow do I invite friends?|Open the Refer tab and share your link. You get a reward when your friend joins the Official Channel and starts mining or finishes a task.\nWhy can I not send SPC?|You must join the Official Channel and have enough balance. The amount must also be above the minimum.\nWhere do I see the USDT value?|It is shown under your balance in the Wallet. The rate can change.\nWhen can I withdraw?|Withdrawal opens when the admin turns it on. Watch the Official Channel for news.",
+  sup: "" };
+const NK = ["rate", "minc", "refrw", "secs", "prw", "minw", "vp1", "vp2", "vc", "vc2", "vr", "disc", "mins", "srw", "dtr", "spc", "spu", "stt", "wbr", "wbf", "wbn", "adr", "adn", "adg", "adm", "tkm"];
+const PL = { 1: { c: 5e3, v: 500, q: 0 }, 2: { c: 1e4, v: 1000, q: 0 }, 3: { c: 2e4, v: 1000, q: 1 } };
+const ADM = new Set(["al", "as", "at", "ae", "ad", "ap", "aw", "ao", "aa", "au", "ab", "ag", "ar", "dv", "cr", "ac", "cf", "rn", "sp", "sq", "so", "sx"]);
+const ROLE = { as: "cfg", at: "tk", ae: "tk", ad: "tk", ap: "tk", aw: "wd", ao: "od", au: "us", ab: "us", ag: "us", ar: "rt", dv: "rw", cr: "rw", ac: "cm", cf: "cm", rn: "ru", sp: "st", sq: "st", so: "st", sx: "main", aa: "main" };
+const J = (d, s = 200) => new Response(JSON.stringify(d), { status: s, headers: { "content-type": "application/json", "cache-control": "no-store" } });
+const tg = async (env, m, b) => { try { const r = await fetch("https://api.telegram.org/bot" + env.BOT_TOKEN + "/" + m, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(b) }); const j = await r.json(); if (j && j.ok === false && j.error_code !== 403) await logErr(env.DB, "bot", m, b && b.chat_id, "Telegram " + m + " failed: " + (j.description || j.error_code), "chat_id " + (b && b.chat_id)); return j } catch (e) { await logErr(env.DB, "bot", m, b && b.chat_id, e); return { ok: false } } };
+
+// ---------------------------------------------------------------- error log (Admin > Error Logs)
+// Saves a problem with time, action, user and stack trace (line numbers). Same problem = one row with a counter.
+async function logErr(db, src, act, uid, err, extra) {
+  try {
+    if (!db) return;
+    await init(db);
+    const msg = String((err && err.message) || err || "Unknown error").slice(0, 300);
+    const stk = String(extra !== undefined ? extra : (err && err.stack) || "").slice(0, 900);
+    const loc = (stk.match(/([A-Za-z0-9_.\/-]+):([0-9]+):([0-9]+)/) || [""])[0];
+    const sig = (src + "|" + act + "|" + msg + "|" + loc).slice(0, 400), now = Date.now();
+    await db.prepare("INSERT INTO el(sig,src,act,u,msg,stk,n,ts,ls) VALUES(?,?,?,?,?,?,1,?,?) ON CONFLICT(sig) DO UPDATE SET n=n+1,ls=excluded.ls,u=excluded.u").bind(sig, String(src), String(act || "").slice(0, 20), Number(uid) || 0, msg, stk, now, now).run();
+    await db.prepare("DELETE FROM el WHERE id IN (SELECT id FROM el ORDER BY ls DESC LIMIT -1 OFFSET 200)").run();
+  } catch (e) { }
+}
+let READY = false, CC = { t: 0, d: null }, LB = { t: 0, d: null }, MK = { t: 0, d: null };
+
+// ---------------------------------------------------------------- referral: Pending -> Successful
+// Successful only when the invited user joined the Official Channel (checked now) AND started mining or finished a task.
+async function refCheck(db, env, c, id) {
+  try {
+    const rf = await db.prepare("SELECT referrer FROM refs WHERE referred=? AND st='p'").bind(id).first(); if (!rf) return;
+    const me = await db.prepare("SELECT c FROM u WHERE id=?").bind(id).first(); if (!me || me.c != 1) return;
+    const a = await db.prepare("SELECT COALESCE((SELECT st FROM mining WHERE u=?),0) ms,(SELECT COUNT(*) FROM h WHERE u=? AND k='mc') m,(SELECT COUNT(*) FROM d WHERE u=? AND c=1) t").bind(id, id, id).first();
+    if (!(a && (a.ms > 0 || a.m > 0 || a.t > 0))) return;
+    if (chs(c.ch).length && await chanCheck(env, id, c)) return;
+    const rw = Number(c.refrw) || 0, g = "EXISTS(SELECT 1 FROM refs WHERE referred=? AND st='p')";
+    const rb = await db.batch([
+      db.prepare("UPDATE u SET p=ROUND(p+?,6),rc=rc+1 WHERE id=? AND " + g).bind(rw, rf.referrer, id),
+      db.prepare("UPDATE refs SET st='s',rw=?,ts=? WHERE referred=? AND st='p'").bind(rw, Date.now(), id)]);
+    if (rb[1].meta.changes == 1) await notify(env, rf.referrer, "\u{1F91D} Your referral is now Successful! Your reward of " + nf(rw) + " SPC is waiting in the Refer tab.");
+  } catch (e) { await logErr(db, "server", "refcheck", id, e) }
+}
+
+// ---------------------------------------------------------------- 3-level lifetime commission (paid in SPC from the admin pool)
+async function payCommission(db, c, buyer, ref, kd, base, unit) {
+  try {
+    const pcts = [Number(c.cp1), Number(c.cp2), Number(c.cp3)], rate = Number(c.urt);
+    let cur = buyer;
+    for (let lvl = 1; lvl <= 3; lvl++) {
+      const r = await db.prepare("SELECT referrer FROM refs WHERE referred=? AND st='s'").bind(cur).first();
+      if (!r) break; cur = r.referrer;
+      const bp = Math.round((pcts[lvl - 1] || 0) * 100); if (!(bp > 0)) continue;
+      const bm = Math.round(base * 1e6);
+      const amt = unit == "usdt" ? (rate > 0 ? Math.round(bm * bp / 10000 / rate) / 1e6 : 0) : Math.round(bm * bp / 10000) / 1e6;
+      if (!(amt > 0)) continue;
+      const now = Date.now(), row = [ref, lvl, cur, buyer, kd, bp, base, unit, amt, now];
+      if (await capOk(db, amt)) {
+        const g = "NOT EXISTS(SELECT 1 FROM cm WHERE ref=? AND lvl=?) AND (SELECT b FROM cp WHERE id=1)>=?";
+        const own = "EXISTS(SELECT 1 FROM cm WHERE ref=? AND lvl=? AND st='p' AND ts=?)";
+        const cr = await db.batch([
+          db.prepare("INSERT INTO cm(ref,lvl,u,src,kd,bp,base,ut,amt,st,ts) SELECT ?,?,?,?,?,?,?,?,?,'p',? WHERE " + g).bind(...row, ref, lvl, amt),
+          db.prepare("INSERT INTO h(u,k,amt,ts,n,rt) SELECT ?,'commission',?,?,?,? WHERE " + own).bind(cur, amt, now, "Level " + lvl, String(c.urt), ref, lvl, now),
+          db.prepare("UPDATE u SET b=ROUND(b+?,6) WHERE id=? AND " + own).bind(amt, cur, ref, lvl, now),
+          db.prepare("UPDATE cp SET b=ROUND(b-?,6) WHERE id=1 AND " + own).bind(amt, ref, lvl, now)]);
+        if (cr[2].meta.changes == 1) await notify(null, cur, "\u{1F4B8} Team commission: +" + nf(amt) + " SPC (Level " + lvl + ") from a " + (kd == "stock" ? "stock" : "VIP/VVIP") + " purchase.");
+      }
+      // not paid (pool empty or supply cap): keep a record so the admin can see it
+      await db.prepare("INSERT OR IGNORE INTO cm(ref,lvl,u,src,kd,bp,base,ut,amt,st,ts) VALUES(?,?,?,?,?,?,?,?,?,'u',?)").bind(...row).run();
+    }
+  } catch (e) { await logErr(db, "server", "commission", buyer, e) }
+}
+
+// ---------------------------------------------------------------- bot notifications (sent only after the database action worked)
+let CTX = null, GENV = null, ORIGIN = "", LCN = { t: 0, v: null };
+const nf = n => Number(n).toLocaleString("en-US", { maximumFractionDigits: 6 });
+async function notify(env, uid, text) {
+  try {
+    env = env || GENV; if (!env || !uid) return;
+    const kb = ORIGIN ? { text: "\u{1F578} Open App", web_app: { url: ORIGIN } } : { text: "\u{1F578} Open App", url: "https://t.me/" + BOT_USER + "?startapp" };
+    const p = tg(env, "sendMessage", { chat_id: uid, text, reply_markup: { inline_keyboard: [[kb]] } });
+    if (CTX) { try { CTX.waitUntil(p); return } catch (e) { } }
+    await p;
+  } catch (e) { }
+}
+
+// ---------------------------------------------------------------- live counters for the Home page (cached for 5 minutes)
+async function liveCounters(db) {
+  const n = Date.now();
+  if (LCN.v && n - LCN.t < 3e5) return LCN.v;
+  try {
+    const d0 = new Date(n); d0.setUTCHours(0, 0, 0, 0);
+    const a = await db.prepare("SELECT COUNT(*) m,COALESCE(SUM(ts>=?),0) j FROM u").bind(d0.getTime()).first();
+    const sv = await db.prepare("SELECT k,v FROM s WHERE k IN ('_lci','_lct')").all();
+    let last = 0, tot = 0; for (const r of sv.results) { if (r.k == "_lci") last = Number(r.v) || 0; else tot = Number(r.v) || 0 }
+    const h = await db.prepare("SELECT (SELECT COALESCE(MAX(id),0) FROM h) mx,COALESCE(SUM(CASE WHEN amt>0 AND k IN ('mc','task','referral','bonus','checkin','gift','story','farm','commission','ad') THEN amt END),0) t FROM h WHERE id>?").bind(last).first();
+    tot = Math.round((tot + Number(h.t || 0)) * 1e6) / 1e6;
+    await db.batch([db.prepare("INSERT OR REPLACE INTO s(k,v) VALUES('_lci',?)").bind(String(Math.max(last, Number(h.mx) || 0))), db.prepare("INSERT OR REPLACE INTO s(k,v) VALUES('_lct',?)").bind(String(tot))]);
+    LCN = { t: n, v: { m: Number(a.m) || 0, j: Number(a.j) || 0, c: tot } };
+  } catch (e) { await logErr(db, "server", "counters", 0, e); LCN.t = n - 24e4; if (!LCN.v) LCN.v = { m: 0, j: 0, c: 0 } }
+  return LCN.v;
+}
+
+// ---------------------------------------------------------------- community supply cap
+async function heldSum(db, fresh) {
+  const n = Date.now();
+  if (!fresh && SUP.t && n - SUP.t < 6e4) return SUP.v;
+  const r = await db.prepare("SELECT COALESCE(SUM(b),0)+(SELECT COALESCE(SUM(amt),0) FROM gf WHERE st='p')+(SELECT COUNT(*) FROM u WHERE wc=0)*COALESCE((SELECT CAST(v AS REAL) FROM s WHERE k='wbn'),1000) s FROM u").first();
+  SUP = { t: n, v: Number(r && r.s) || 0 }; return SUP.v;
+}
+async function capOk(db, add) {
+  add = Number(add) || 0; if (add <= 0) return true;
+  let h = await heldSum(db);
+  if (h + add > COMMUNITY_CAP * 0.98) h = await heldSum(db, true);
+  if (h + add > COMMUNITY_CAP) return false;
+  SUP.v = h + add; return true;
+}
+
+// ---------------------------------------------------------------- schema
+async function init(db) {
+  if (READY) return;
+  const v = await db.prepare("SELECT v FROM s WHERE k='_sv'").first().catch(() => null);
+  if (!v || v.v !== SV) {
+    await db.batch([
+      db.prepare("CREATE TABLE IF NOT EXISTS u(id INTEGER PRIMARY KEY,n TEXT,r INTEGER DEFAULT 0,b REAL DEFAULT 0,m INTEGER DEFAULT 0,c INTEGER DEFAULT 0,p REAL DEFAULT 0,a INTEGER DEFAULT 0,un TEXT DEFAULT '',vl INTEGER DEFAULT 0,vx INTEGER DEFAULT 0,fm TEXT DEFAULT '',sl INTEGER DEFAULT 0,ss INTEGER DEFAULT 0,rc INTEGER DEFAULT 0,bn INTEGER DEFAULT 0,ts INTEGER DEFAULT 0,rg INTEGER DEFAULT 0)"),
+      db.prepare("CREATE TABLE IF NOT EXISTS t(id INTEGER PRIMARY KEY AUTOINCREMENT,url TEXT,rw REAL,o INTEGER DEFAULT 0,l INTEGER DEFAULT 999999999,q INTEGER DEFAULT 0,st TEXT DEFAULT 'a',x TEXT)"),
+      db.prepare("CREATE TABLE IF NOT EXISTS d(u INTEGER,t INTEGER,y TEXT,s INTEGER,c INTEGER DEFAULT 0,PRIMARY KEY(u,t,y))"),
+      db.prepare("CREATE TABLE IF NOT EXISTS w(id INTEGER PRIMARY KEY AUTOINCREMENT,u INTEGER,amt REAL,ad TEXT,st TEXT DEFAULT 'p',ts INTEGER DEFAULT 0)"),
+      db.prepare("CREATE TABLE IF NOT EXISTS s(k TEXT PRIMARY KEY,v TEXT)"),
+      db.prepare("CREATE TABLE IF NOT EXISTS h(id INTEGER PRIMARY KEY AUTOINCREMENT,u INTEGER,k TEXT,amt REAL,ts INTEGER,n TEXT)"),
+      db.prepare("CREATE TABLE IF NOT EXISTS o(id INTEGER PRIMARY KEY AUTOINCREMENT,u INTEGER,k TEXT,tx TEXT,st TEXT DEFAULT 'p',ex INTEGER DEFAULT 0,y TEXT)"),
+      db.prepare("CREATE TABLE IF NOT EXISTS admins(id INTEGER PRIMARY KEY,by INTEGER DEFAULT 0,ts INTEGER DEFAULT 0,rl TEXT DEFAULT 'cfg,tk,us,wd,od,st')"),
+      db.prepare("CREATE TABLE IF NOT EXISTS mining(u INTEGER PRIMARY KEY,st INTEGER DEFAULT 0)"),
+      db.prepare("CREATE TABLE IF NOT EXISTS refs(referred INTEGER PRIMARY KEY,referrer INTEGER,rw REAL DEFAULT 0,ts INTEGER DEFAULT 0)"),
+      db.prepare("CREATE TABLE IF NOT EXISTS txs(tx TEXT PRIMARY KEY,k TEXT,u INTEGER,ts INTEGER DEFAULT 0)"),
+      db.prepare("CREATE TABLE IF NOT EXISTS stk(u INTEGER PRIMARY KEY,n INTEGER DEFAULT 0,fr INTEGER DEFAULT 0)"),
+      db.prepare("CREATE TABLE IF NOT EXISTS inv(no TEXT PRIMARY KEY,u INTEGER,q INTEGER,pu REAL,cu TEXT,tot REAL,pm TEXT,tx TEXT,st TEXT,ts INTEGER,nm TEXT,un TEXT,lv INTEGER DEFAULT 0)"),
+      db.prepare("CREATE TABLE IF NOT EXISTS stl(id INTEGER PRIMARY KEY AUTOINCREMENT,u INTEGER,k TEXT,q INTEGER,n TEXT,ts INTEGER)"),
+      db.prepare("CREATE TABLE IF NOT EXISTS pl(id INTEGER PRIMARY KEY AUTOINCREMENT,no TEXT UNIQUE,k TEXT,pps REAL,nt TEXT,hold INTEGER,tot REAL,ts INTEGER,aid INTEGER)"),
+      db.prepare("CREATE TABLE IF NOT EXISTS wb(u INTEGER,y TEXT,PRIMARY KEY(u,y))"),
+      db.prepare("CREATE TABLE IF NOT EXISTS cm(id INTEGER PRIMARY KEY AUTOINCREMENT,ref TEXT,lvl INTEGER,u INTEGER,src INTEGER,kd TEXT,bp INTEGER,base REAL,ut TEXT,amt REAL,st TEXT,ts INTEGER)"),
+      db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS cmu ON cm(ref,lvl)"),
+      db.prepare("CREATE INDEX IF NOT EXISTS cmr ON cm(u,id)"),
+      db.prepare("CREATE TABLE IF NOT EXISTS cp(id INTEGER PRIMARY KEY,b REAL DEFAULT 0)"),
+      db.prepare("INSERT OR IGNORE INTO cp(id,b) VALUES(1,0)"),
+      db.prepare("CREATE TABLE IF NOT EXISTS el(id INTEGER PRIMARY KEY AUTOINCREMENT,sig TEXT UNIQUE,src TEXT,act TEXT,u INTEGER DEFAULT 0,msg TEXT,stk TEXT,n INTEGER DEFAULT 1,ts INTEGER,ls INTEGER)"),
+      db.prepare("CREATE TABLE IF NOT EXISTS gf(id INTEGER PRIMARY KEY AUTOINCREMENT,u INTEGER,amt REAL,lb TEXT,ts INTEGER,st TEXT DEFAULT 'p',ct INTEGER DEFAULT 0)"),
+      db.prepare("CREATE TABLE IF NOT EXISTS ci(u INTEGER,y TEXT,d INTEGER,amt REAL,ts INTEGER,PRIMARY KEY(u,y))"),
+      db.prepare("CREATE TABLE IF NOT EXISTS ad(u INTEGER PRIMARY KEY,y TEXT DEFAULT '',rd INTEGER DEFAULT 0,n INTEGER DEFAULT 0,bk INTEGER DEFAULT 0,st INTEGER DEFAULT 0,ts INTEGER DEFAULT 0)")]);
+    const addCols = async (tbl, list) => {
+      const cols = ((await db.prepare("PRAGMA table_info(" + tbl + ")").all()).results || []).map(r => r.name);
+      for (const [n, t] of list) if (!cols.includes(n)) { try { await db.prepare("ALTER TABLE " + tbl + " ADD COLUMN " + n + " " + t).run() } catch (e) { } }
+    };
+    await addCols("u", [["un", "TEXT DEFAULT ''"], ["vl", "INTEGER DEFAULT 0"], ["vx", "INTEGER DEFAULT 0"], ["fm", "TEXT DEFAULT ''"], ["sl", "INTEGER DEFAULT 0"], ["ss", "INTEGER DEFAULT 0"], ["rc", "INTEGER DEFAULT 0"], ["bn", "INTEGER DEFAULT 0"], ["ts", "INTEGER DEFAULT 0"], ["rg", "INTEGER DEFAULT 0"]]);
+    await addCols("w", [["ts", "INTEGER DEFAULT 0"]]);
+    await addCols("h", [["rt", "TEXT DEFAULT ''"]]);
+    const hadWc = ((await db.prepare("PRAGMA table_info(u)").all()).results || []).some(x => x.name == "wc");
+    await addCols("u", [["wc", "INTEGER DEFAULT 0"], ["cs", "INTEGER DEFAULT 0"], ["cd", "TEXT DEFAULT ''"]]);
+    if (!hadWc) await db.prepare("UPDATE u SET wc=2").run(); // users who already exist do not get the new-user welcome bonus
+    const hadGd = ((await db.prepare("PRAGMA table_info(u)").all()).results || []).some(x => x.name == "gd");
+    await addCols("u", [["gd", "INTEGER DEFAULT 0"]]);
+    if (!hadGd) await db.prepare("UPDATE u SET gd=1").run(); // people who already use the app do not need the guide
+    await addCols("t", [["bl", "TEXT DEFAULT ''"]]);
+    await addCols("u", [["la", "INTEGER DEFAULT 0"], ["mn", "INTEGER DEFAULT 0"]]);
+    await db.prepare("UPDATE u SET mn=(SELECT COUNT(*) FROM u u2 WHERE u2.ts<u.ts OR (u2.ts=u.ts AND u2.id<=u.id)) WHERE mn=0").run();
+    await addCols("refs", [["st", "TEXT DEFAULT 's'"]]);
+    await db.prepare("INSERT OR IGNORE INTO refs(referred,referrer,rw,ts,st) SELECT id,r,0,0,'p' FROM u WHERE r>0 AND c=0").run();
+    await addCols("admins", [["rl", "TEXT DEFAULT 'cfg,tk,us,wd,od,st'"]]);
+    await db.batch([
+      db.prepare("CREATE INDEX IF NOT EXISTS hu ON h(u,id)"),
+      db.prepare("CREATE INDEX IF NOT EXISTS uun ON u(un)"),
+      db.prepare("CREATE INDEX IF NOT EXISTS ur ON u(r)"),
+      db.prepare("CREATE INDEX IF NOT EXISTS rr ON refs(referrer)"),
+      db.prepare("CREATE INDEX IF NOT EXISTS ts_ ON t(st,o,id)"),
+      db.prepare("CREATE INDEX IF NOT EXISTS wst ON w(st,id)"),
+      db.prepare("CREATE INDEX IF NOT EXISTS ost ON o(st,k,y)"),
+      db.prepare("INSERT OR IGNORE INTO admins(id,by,ts) SELECT id,0,0 FROM u WHERE a=1"),
+      db.prepare("INSERT OR IGNORE INTO mining(u,st) SELECT id,m FROM u WHERE m>0"),
+      db.prepare("INSERT OR IGNORE INTO refs(referred,referrer,rw,ts) SELECT id,r,0,0 FROM u WHERE r>0 AND c=1"),
+      db.prepare("INSERT OR IGNORE INTO txs(tx,k,u,ts) SELECT lower(tx),k,u,0 FROM o WHERE tx IS NOT NULL AND tx!=''"),
+      db.prepare("INSERT OR IGNORE INTO txs(tx,k,u,ts) SELECT lower(substr(x,instr(x,'|')+1)),'promo',o,0 FROM t WHERE x LIKE '%|%'"),
+      db.prepare("CREATE INDEX IF NOT EXISTS invu ON inv(u,ts)"),
+      db.prepare("CREATE INDEX IF NOT EXISTS invs ON inv(st,pm,ts)"),
+      db.prepare("CREATE INDEX IF NOT EXISTS stlu ON stl(u,id)"),
+      db.prepare("CREATE INDEX IF NOT EXISTS els ON el(ls)"),
+      db.prepare("CREATE TABLE IF NOT EXISTS pi(id TEXT PRIMARY KEY,u INTEGER,k TEXT,d TEXT,ts INTEGER,sn INTEGER DEFAULT 0)"),
+      db.prepare("CREATE INDEX IF NOT EXISTS piu ON pi(u)"),
+      db.prepare("CREATE INDEX IF NOT EXISTS gfu ON gf(u,st)"),
+      db.prepare("INSERT OR IGNORE INTO s(k,v) VALUES('_sold','0')"),
+      db.prepare("INSERT OR REPLACE INTO s(k,v) VALUES('_sv',?)").bind(SV)]);
+  }
+  READY = true;
+}
+
+// ---------------------------------------------------------------- Telegram initData verification
+async function ver(IP, tok) {
+  try {
+    const h = IP.get("hash"); if (!h || !tok) return null; IP.delete("hash");
+    const ad = +IP.get("auth_date"); if (!ad || Date.now() / 1e3 - ad > 172800) return null;
+    const dc = [...IP.entries()].sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0).map(([k, v]) => k + "=" + v).join("\n");
+    const E = new TextEncoder(), hm = async (k, m) => new Uint8Array(await crypto.subtle.sign("HMAC", await crypto.subtle.importKey("raw", k, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]), E.encode(m)));
+    const sg = await hm(await hm(E.encode("WebAppData"), tok), dc);
+    const hx = [...sg].map(b => b.toString(16).padStart(2, "0")).join("");
+    if (hx.length !== h.length) return null;
+    let d = 0; for (let i = 0; i < hx.length; i++) d |= hx.charCodeAt(i) ^ h.charCodeAt(i);
+    if (d) return null;
+    const u = JSON.parse(IP.get("user"));
+    return u && Number.isInteger(u.id) && u.id > 0 ? u : null;
+  } catch (e) { return null }
+}
+
+async function getC(db, fresh) {
+  const n = Date.now(); if (!fresh && CC.d && n - CC.t < 2e4) return CC.d;
+  const c = { ...DEF };
+  ((await db.prepare("SELECT k,v FROM s").all()).results || []).forEach(r => { if (Object.prototype.hasOwnProperty.call(DEF, r.k)) c[r.k] = r.v });
+  CC = { t: n, d: c }; return c;
+}
+const chs = s => String(s || "").split(",").map(x => x.trim()).filter(Boolean);
+// Returns "" when the user is in every Official Channel, otherwise the message to show.
+async function chanCheck(env, id, c) {
+  for (const x of chs(c.ch)) {
+    const r = await tg(env, "getChatMember", { chat_id: x, user_id: id });
+    if (!r || !r.ok) return "Cannot check the Official Channel right now. Please try again later.";
+    const st = r.result.status;
+    if (st == "left" || st == "kicked" || (st == "restricted" && !r.result.is_member)) return "Join the Official Channel first. It is required to send and withdraw SPC.";
+  }
+  return "";
+}
+
+// ---------------------------------------------------------------- router
+export default {
+  async fetch(rq, env, ctx) {
+    CTX = ctx || null; GENV = env;
+    try {
+      const U = new URL(rq.url), db = env.DB; ORIGIN = U.origin;
+      if (U.pathname == "/webhook" && rq.method == "POST") {
+        if (!env.WEBHOOK_SECRET || rq.headers.get("x-telegram-bot-api-secret-token") !== env.WEBHOOK_SECRET) return new Response("forbidden", { status: 403 });
+        let up; try { up = await rq.json() } catch (e) { return new Response("ok") }
+        const m = up.message;
+        try {
+        if (m && m.text && m.from && m.chat && m.chat.type == "private" && /^\/start(@\w+)?(\s|$)/.test(m.text)) {
+          await init(db);
+          const prm = m.text.split(/\s+/)[1] || ""; let r = /^r[0-9]{1,15}$/.test(prm) ? +prm.slice(1) : 0;
+          if (r && (r == m.from.id || !(await db.prepare("SELECT id FROM u WHERE id=?").bind(r).first()))) r = 0;
+          await db.batch([
+            db.prepare("INSERT OR IGNORE INTO u(id,n,r,ts) VALUES(?,?,?,?)").bind(m.from.id, String(m.from.first_name || "User").slice(0, 64), r, Date.now()),
+            db.prepare("UPDATE u SET r=? WHERE id=? AND r=0 AND rg=0 AND ?>0").bind(r, m.from.id, r)]);
+          await tg(env, "sendMessage", { chat_id: m.chat.id, text: "🕷 Welcome to Spider Coin! Mine, complete tasks and invite friends.", reply_markup: { inline_keyboard: [[{ text: "🕸 Open App", web_app: { url: U.origin + "/app" } }]] } });
+        }
+        } catch (e) { await logErr(db, "server", "webhook", 0, e) }
+        return new Response("ok");
+      }
+      const pm = U.pathname.match(/^\/p\/([a-f0-9]{32})\.jpg$/);
+      if (pm && rq.method == "GET") {
+        await init(db);
+        const row = await db.prepare("SELECT d FROM pi WHERE id=?").bind(pm[1]).first();
+        if (!row) return new Response("Not found", { status: 404 });
+        const bin = atob(row.d), by = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) by[i] = bin.charCodeAt(i);
+        return new Response(by, { headers: { "content-type": "image/jpeg", "cache-control": "public, max-age=3600" } });
+      }
+      if (U.pathname == "/api" && rq.method == "POST") {
+        const rc = rq.clone();
+        try { return await run(rq, env) } catch (e) {
+          let a = "", uid = 0;
+          try { const q = await rc.json(); a = String(q.a || "").slice(0, 12); uid = Number(JSON.parse(new URLSearchParams(String(q.i || "")).get("user") || "{}").id) || 0 } catch (e2) { }
+          await logErr(db, "server", a, uid, e);
+          return J({ e: "Server error. Please try again." }, 500);
+        }
+      }
+      if (U.pathname == "/invoice" && rq.method == "GET") return await invoice(U, env);
+      return new Response(HTML.replace("{{AU}}", ADMIN_USER).replace("{{VER}}", APP_VERSION), { headers: { "content-type": "text/html;charset=UTF-8", "cache-control": "no-store" } });
+    } catch (e) { await logErr(env.DB, "server", "route", 0, e); return J({ e: "Server error. Please try again." }, 500) }
+  }
+};
+
+// ---------------------------------------------------------------- API
+async function run(rq, env) {
+  let q; try { q = await rq.json() } catch (e) { return J({ e: "Bad request" }, 400) }
+  if (!q || typeof q.a !== "string" || typeof q.i !== "string") return J({ e: "Bad request" }, 400);
+  const db = env.DB; if (!db || !env.BOT_TOKEN) return J({ e: "Server is not configured" }, 500);
+  const IP = new URLSearchParams(q.i), us = await ver(IP, env.BOT_TOKEN);
+  if (!us) return J({ e: "Open the app from Telegram" }, 401);
+  await init(db);
+  const a = q.a, id = us.id, now = Date.now(), today = new Date(now).toISOString().slice(0, 10), MAIN = String(env.ADMIN_ID || MAIN_ADMIN);
+  const P = (s, ...p) => db.prepare(s).bind(...p), X = (s, ...p) => P(s, ...p).run(), Q = (s, ...p) => P(s, ...p).first(),
+    E = e => J({ e }),
+    HS = (w, k, m, n, g, gb) => P("INSERT INTO h(u,k,amt,ts,n,rt) SELECT ?,?,?,?,?,? WHERE " + g, w, k, m, now, n || "", String(c.urt), ...gb);
+  const c = await getC(db, a == "wd" || ADM.has(a)), N = k => +c[k];
+  c.secs = Math.max(30, +c.secs || 30);
+  const mult = (() => { const k = +c.dbl; return k > 1 && now >= +c.dbs && now <= +c.dbe ? k : 1 })(), R6 = x => Math.round(x * 1e6) / 1e6;
+  const SEL = "SELECT u.*,COALESCE((SELECT st FROM mining WHERE u=u.id),0) mst,EXISTS(SELECT 1 FROM admins WHERE id=u.id) isa,(SELECT rl FROM admins WHERE id=u.id) arl FROM u WHERE u.id=?";
+  const un = (us.username || "").toLowerCase(), nm = String(us.first_name || "User").slice(0, 64);
+  const sp = IP.get("start_param") || "";
+  const rr = async () => { const r = /^r[0-9]{1,15}$/.test(sp) ? +sp.slice(1) : 0; return r && r != id && await Q("SELECT id FROM u WHERE id=?", r) ? r : 0 };
+  let u = await Q(SEL, id);
+  if (!u) { await X("INSERT OR IGNORE INTO u(id,n,r,ts,rg) VALUES(?,?,?,?,1)", id, nm, await rr(), now); await X("UPDATE u SET mn=(SELECT COALESCE(MAX(mn),0)+1 FROM u) WHERE id=? AND mn=0", id); u = await Q(SEL, id); if (u && u.r) await X("INSERT OR IGNORE INTO refs(referred,referrer,rw,ts,st) VALUES(?,?,0,?,'p')", id, u.r, now) }
+  else if (!u.rg && !u.r) { const r0 = await rr(); if (r0) { await X("UPDATE u SET r=? WHERE id=?", r0, id); u.r = r0; await X("INSERT OR IGNORE INTO refs(referred,referrer,rw,ts,st) VALUES(?,?,0,?,'p')", id, r0, now) } }
+  if ((u.un || "") !== un || u.n !== nm || !u.rg) {
+    const st = []; if (un) st.push(P("UPDATE u SET un='' WHERE un=? AND id!=?", un, id));
+    st.push(P("UPDATE u SET un=?,n=?,rg=1 WHERE id=?", un, nm, id)); await db.batch(st); u.un = un; u.n = nm; u.rg = 1;
+  }
+  if (!(u.la > now - 6e5)) { await X("UPDATE u SET la=? WHERE id=?", now, id); u.la = now }
+  const adm = String(id) == MAIN || u.isa == 1;
+  const isMain = String(id) == MAIN, roles = new Set(String(u.arl || "").split(",")), can = r => isMain || (r !== "main" && roles.has(r));
+  if (u.bn && !adm) return E("Your account is blocked");
+  if (a == "ce") {
+    const l = Math.floor(+q.l) || 0, cl = Math.floor(+q.c) || 0, m = String(q.m || "").slice(0, 300), t = String(q.t || "").slice(0, 3);
+    if (m && !/^Script error/i.test(m)) await logErr(db, "client", "ui:" + t, id, m, "@" + l + ":" + cl + "\n" + String(q.st || "").slice(0, 700));
+    return J({ ok: 1 });
+  }
+  if (a == "rl") {
+    return J({
+      l: (await P("SELECT r.referred id,u.n,u.un,r.st,r.ts FROM refs r JOIN u ON u.id=r.referred WHERE r.referrer=? ORDER BY r.ts DESC LIMIT 100", id).all()).results,
+      cs: (await P("SELECT lvl,COUNT(*) n,COALESCE(SUM(amt),0) a FROM cm WHERE u=? AND st='p' GROUP BY lvl", id).all()).results,
+      ch: (await P("SELECT lvl,kd,amt,ts FROM cm WHERE u=? AND st='p' ORDER BY id DESC LIMIT 30", id).all()).results
+    });
+  }
+  if (a == "pu") {
+    const k = q.k == "st" ? "st" : "sq", d = String(q.d || ""), bad = "The poster could not be saved. Please try again.";
+    if (d.length > 700000 || d.slice(0, 23) != "data:image/jpeg;base64,") return E(bad);
+    const b64 = d.slice(23);
+    if (b64.length < 100 || !/^[A-Za-z0-9+/]+={0,2}$/.test(b64)) return E(bad);
+    let h; try { h = atob(b64.slice(0, 8)) } catch (e) { return E(bad) }
+    if (h.charCodeAt(0) != 255 || h.charCodeAt(1) != 216) return E(bad);
+    const last = await db.prepare("SELECT MAX(ts) t FROM pi WHERE u=?").bind(id).first();
+    if (last && last.t && now - last.t < 3000) return E("Please wait a moment and try again.");
+    const tok = [...crypto.getRandomValues(new Uint8Array(16))].map(x => x.toString(16).padStart(2, "0")).join("");
+    await db.batch([P("DELETE FROM pi WHERE u=? AND k=?", id, k), P("DELETE FROM pi WHERE ts<?", now - 864e5), P("INSERT INTO pi(id,u,k,d,ts,sn) VALUES(?,?,?,?,?,0)", tok, id, k, b64, now)]);
+    return J({ id: tok, url: ORIGIN + "/p/" + tok + ".jpg" });
+  }
+  if (a == "ps") {
+    const tok = String(q.id || "");
+    if (!/^[a-f0-9]{32}$/.test(tok)) return E("Poster not found");
+    const row = await db.prepare("SELECT sn FROM pi WHERE id=? AND u=?").bind(tok, id).first();
+    if (!row) return E("Poster not found");
+    if (now - row.sn < 10000) return E("Please wait a few seconds.");
+    await X("UPDATE pi SET sn=? WHERE id=?", now, tok);
+    const rr = await tg(env, "sendPhoto", { chat_id: id, photo: ORIGIN + "/p/" + tok + ".jpg", caption: "My SPIDER COMMUNITY poster. Join me: https://t.me/" + BOT_USER + "?startapp=r" + id });
+    if (!rr || !rr.ok) return E("Could not send the poster. Open the bot chat, press Start, then try again.");
+    return J({ ok: 1 });
+  }
+  if (a == "cm") { const has = chs(c.ch).length > 0; return J({ m: has ? !(await chanCheck(env, id, c)) : null }) }
+  if (a == "sa" || a == "ud") {
+    if (!adm || !can("sa")) return E("You do not have permission for this action");
+    if (a == "sa") {
+      const r = await db.batch([
+        P("SELECT COUNT(*) n,COALESCE(SUM(la>=?),0) d1,COALESCE(SUM(la>=?),0) d7,COALESCE(SUM(la>=?),0) d30,COALESCE(SUM(vl=1 AND vx>?),0) v1,COALESCE(SUM(vl=2 AND vx>?),0) v2,COALESCE(SUM(b),0) b FROM u", now - 864e5, now - 7 * 864e5, now - 30 * 864e5, now, now),
+        P("SELECT COUNT(*) n,COALESCE(SUM(st='p'),0) p,COALESCE(SUM(st='s'),0) s,COALESCE(SUM(CASE WHEN st='s' THEN rw END),0) rw FROM refs"),
+        P("SELECT COALESCE(SUM(CASE WHEN st='p' THEN amt END),0) paid,COALESCE(SUM(st='u'),0) unpaid FROM cm"),
+        P("SELECT COUNT(*) n FROM stk WHERE n>0")]);
+      const x = r[0].results[0], f = r[1].results[0], m = r[2].results[0];
+      return J({ n: x.n, vis: x.n, d1: x.d1, d7: x.d7, d30: x.d30, inact: x.n - x.d7, vip: x.v1, vvip: x.v2, norm: x.n - x.v1 - x.v2, held: x.b, holders: r[3].results[0].n, rn: f.n, rp: f.p, rs: f.s, rrw: f.rw, cpaid: m.paid, cun: m.unpaid });
+    }
+    const qid = Math.floor(+q.id) || 0;
+    if (qid) {
+      const U1 = await Q("SELECT id,n,un,b,vl,vx,la,ts,mn FROM u WHERE id=?", qid); if (!U1) return E("User not found");
+      const r = await db.batch([
+        P("SELECT COUNT(*) n,COALESCE(SUM(st='p'),0) p,COALESCE(SUM(st='s'),0) s,COALESCE(SUM(CASE WHEN st='s' THEN rw END),0) rw FROM refs WHERE referrer=?", qid),
+        P("SELECT COALESCE(SUM(amt),0) a FROM cm WHERE u=? AND st='p'", qid),
+        P("SELECT COUNT(*) n FROM d WHERE u=? AND c=1", qid),
+        P("SELECT y,d,amt FROM ci WHERE u=? ORDER BY ts DESC LIMIT 10", qid),
+        P("SELECT COALESCE((SELECT n FROM stk WHERE u=?),0) n", qid),
+        P("SELECT no,q,tot,cu,pm,st,ts FROM inv WHERE u=? ORDER BY ts DESC LIMIT 10", qid),
+        P("SELECT k,amt,ts,n,rt FROM h WHERE u=? ORDER BY id DESC LIMIT 15", qid)]);
+      return J({ d: { u: U1, rf: r[0].results[0], cm: r[1].results[0].a, tk: r[2].results[0].n, ci: r[3].results, st: r[4].results[0].n, pu: r[5].results, hs: r[6].results } });
+    }
+    const like = z => z.replace(/[!%_]/g, ch => "!" + ch), s0 = String(q.q || "").trim().slice(0, 40).replace(/^@/, ""), mem = String(q.m || ""), bmin = Math.max(0, Number(q.bmin) || 0);
+    const w = ["1=1"], pr = [];
+    if (s0) {
+      if (/^[0-9]{3,15}$/.test(s0)) { w.push("(id=? OR un LIKE ? ESCAPE '!' OR n LIKE ? ESCAPE '!')"); pr.push(+s0, "%" + like(s0) + "%", "%" + like(s0) + "%") }
+      else { w.push("(un LIKE ? ESCAPE '!' OR n LIKE ? ESCAPE '!')"); pr.push("%" + like(s0.toLowerCase()) + "%", "%" + like(s0) + "%") }
+    }
+    if (mem == "n") { w.push("NOT (vl>0 AND vx>?)"); pr.push(now) } else if (mem == "v") { w.push("(vl=1 AND vx>?)"); pr.push(now) } else if (mem == "w") { w.push("(vl=2 AND vx>?)"); pr.push(now) }
+    if (bmin > 0) { w.push("b>=?"); pr.push(bmin) }
+    const rs = await P("SELECT id,n,un,b,vl,vx,la,ts,mn FROM u WHERE " + w.join(" AND ") + " ORDER BY ts DESC LIMIT 20", ...pr).all();
+    return J({ us: rs.results });
+  }
+  if (a == "lg" || a == "lc" || a == "lt") {
+    if (!adm || !can("lg")) return E("You do not have permission for this action");
+    if (a == "lt") throw new Error("Test error created by the admin button");
+    if (a == "lc") { await X("DELETE FROM el"); return J({ lg: [] }) }
+    return J({ lg: (await P("SELECT id,src,act,u,msg,stk,n,ts,ls FROM el ORDER BY ls DESC LIMIT 60").all()).results });
+  }
+  const lv = u.vx > now ? u.vl : 0, er = (lv ? N("vr") : N("rate")) * (1 + Math.min(100, 5 * (+u.rc || 0)) / 100);
+
+  if (a == "hi") return J({ h: (await P("SELECT k,amt,ts,n,rt FROM h WHERE u=? ORDER BY id DESC LIMIT 50", id).all()).results });
+  if (a == "lb") {
+    if (!LB.d || now - LB.t > 6e4) {
+      const r = await P("SELECT id,n,un,b,rc,IIF(vx>?,vl,0) lv FROM u WHERE bn=0 ORDER BY b DESC,rc DESC,lv DESC,id LIMIT 100", now).all();
+      LB = { t: now, d: { lb: r.results, rm: [] } };
+    }
+    return J(LB.d);
+  }
+
+  const invNo = () => "SPC-" + new Date(now).toISOString().slice(2, 10).replace(/-/g, "") + "-" + String(id).slice(-4) + "-" + crypto.randomUUID().slice(0, 6).toUpperCase();
+  const findTo = async raw => {
+    const to = String(raw || "").replace(/^@/, "").trim().toLowerCase(), byId = /^[0-9]{5,15}$/.test(to);
+    if (!byId && !/^[a-z0-9_]{4,32}$/.test(to)) return { e: "Enter a valid @username or Telegram ID" };
+    const v = byId ? await Q("SELECT id,un FROM u WHERE id=? AND rg=1", +to) : await Q("SELECT id,un FROM u WHERE un=?", to);
+    return v ? { v } : { e: "User not found (they must open the app once)" };
+  };
+  if (a == "fm") {
+    if (!MK.d || now - MK.t > 2e4) {
+      const r = await db.batch([P("SELECT v FROM s WHERE k='_sold'"), P("SELECT COUNT(*) n FROM stk WHERE n>0"), P("SELECT k,pps,nt,hold,tot,ts FROM pl ORDER BY id DESC LIMIT 20"), P("SELECT COALESCE(SUM(tot),0) t FROM pl WHERE k='p'")]);
+      MK = { t: now, d: { sold: r[0].results[0] ? +r[0].results[0].v : 0, holders: r[1].results[0].n, en: r[2].results, paid: r[3].results[0].t } };
+    }
+    return J({ mk: MK.d });
+  }
+  if (a == "fi") {
+    const r = await db.batch([P("SELECT no,q,pu,cu,tot,pm,st,ts FROM inv WHERE u=? ORDER BY ts DESC LIMIT 30", id), P("SELECT k,q,n,ts FROM stl WHERE u=? ORDER BY id DESC LIMIT 30", id)]);
+    return J({ iv: r[0].results, sl: r[1].results });
+  }
+
+  // ------------------------------------------------------------ admin
+  if (ADM.has(a)) {
+    if (!adm) return E("No access");
+    if (ROLE[a] && !can(ROLE[a])) return E("You do not have permission for this action");
+    const OK = String(q.ok) == "1", ON = String(q.on) == "1", tid = Math.floor(+q.id);
+    const find = async s => { s = String(s || "").trim().replace(/^@/, "").toLowerCase(); if (!s) return null; const f = "SELECT id,n,un,b,bn,EXISTS(SELECT 1 FROM admins WHERE id=u.id) isa FROM u WHERE "; return /^[0-9]+$/.test(s) ? Q(f + "id=?", +s) : Q(f + "un=?", s) };
+    let usr = null, ex = null;
+    switch (a) {
+      case "al": break;
+      case "ac": {
+        const o = {};
+        for (const k of ["cp1", "cp2", "cp3"]) { const v = String(q[k] === undefined ? "" : q[k]).trim(); if (!/^[0-9]{1,2}([.][0-9]{1,2})?$/.test(v) || Number(v) > 50) return E("Each percent must be 0 to 50 with up to 2 decimals"); o[k] = String(Number(v)) }
+        for (const k in o) await X("INSERT OR REPLACE INTO s(k,v) VALUES(?,?)", k, o[k]); CC.d = null; break;
+      }
+      case "cf": {
+        const m = Math.round(+q.amt * 1e6) / 1e6; if (!isFinite(m) || m === 0 || Math.abs(m) > 1e10) return E("Enter an amount (use - to take out of the pool)");
+        const r = await X("UPDATE cp SET b=ROUND(b+?,6) WHERE id=1 AND b+?>=0", m, m); if (r.meta.changes != 1) return E("The pool cannot go below 0"); break;
+      }
+      case "dv": {
+        if (String(q.stop) == "1") { await X("INSERT OR REPLACE INTO s(k,v) VALUES(?,?)", "dbe", String(now)); CC.d = null; break }
+        const k = Number(q.k), s0 = Math.floor(+q.s), e0 = Math.floor(+q.e);
+        if (!(k > 1 && k <= 10)) return E("Multiplier must be above 1 and at most 10");
+        if (!(s0 > 0 && e0 > s0 && e0 - s0 <= 30 * 864e5)) return E("Choose a start and an end time (up to 30 days)");
+        await db.batch([P("INSERT OR REPLACE INTO s(k,v) VALUES('dbl',?)", String(k)), P("INSERT OR REPLACE INTO s(k,v) VALUES('dbs',?)", String(s0)), P("INSERT OR REPLACE INTO s(k,v) VALUES('dbe',?)", String(e0))]); CC.d = null; break;
+      }
+      case "cr": {
+        const v = [];
+        for (let i = 1; i <= 7; i++) { const x = Math.round(Number(q["c" + i]) * 1e6) / 1e6; if (!(x > 0 && x <= 1e6)) return E("Enter a reward above 0 for Day " + i); v.push(x) }
+        await db.batch(v.map((x, i) => P("INSERT OR REPLACE INTO s(k,v) VALUES(?,?)", "ci" + (i + 1), String(x)))); CC.d = null; break;
+      }
+      case "rn": {
+        const st = [];
+        for (const k of ["rt_t", "rt_r", "rt_w", "rt_c", "rt_a", "rt_s", "ab_m", "ab_v", "ab_d", "faq", "sup"]) {
+          const v = String(q[k] === undefined ? "" : q[k]).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "").trim().slice(0, k == "faq" ? 3000 : 800);
+          if (k == "sup" && v && !/^(@[A-Za-z0-9_]{3,32}|https:[/][/][^ ]{3,200})$/.test(v)) return E("Support link must be @username or start with https://");
+          st.push(P("INSERT OR REPLACE INTO s(k,v) VALUES(?,?)", k, v));
+        }
+        await db.batch(st); CC.d = null; break;
+      }
+      case "ar": {
+        const v0 = String(q.urt === undefined ? "" : q.urt).trim();
+        if (!/^[0-9]{1,6}([.][0-9]{1,10})?$/.test(v0) || !(Number(v0) > 0)) return E("Enter a rate above 0 with up to 10 decimals, for example 0.0001");
+        await X("INSERT OR REPLACE INTO s(k,v) VALUES(?,?)", "urt", v0.replace(/^0+([0-9])/, "$1")); CC.d = null; break;
+      }
+      case "as": {
+        const o = {};
+        for (const k of NK) if (q[k] !== undefined && q[k] !== "") { const v = Number(q[k]); if (!Number.isFinite(v) || v < 0) return E("Invalid value: " + k); o[k] = v }
+        if (o.secs !== undefined && o.secs < 30) return E("Task wait time must be at least 30 seconds");
+        for (const k of ["minc", "minw", "mins", "spc", "spu"]) if (o[k] !== undefined && !(o[k] > 0)) return E(k + " must be above 0");
+        if (o.disc > 100) return E("Discount max 100");
+        if (o.stt !== undefined) { const sd = +((await Q("SELECT v FROM s WHERE k='_sold'")) || { v: 0 }).v; if (o.stt < sd) return E("Total stock cannot be below sold (" + sd + ")") }
+        if (q.wd !== undefined) { if (!["0", "1"].includes(String(q.wd).trim())) return E("Withdraw must be 0 or 1"); o.wd = +q.wd }
+        if (q.ch !== undefined) { const L = chs(q.ch); if (L.some(x => !/^(@[A-Za-z][A-Za-z0-9_]{3,31}|-100[0-9]{5,})$/.test(x))) return E("Invalid channel list"); o.ch = L.join(",") }
+        if (q.dep !== undefined) { const v = String(q.dep).trim(); if (v && !/^0x[a-fA-F0-9]{40}$/.test(v)) return E("Invalid deposit address"); o.dep = v }
+        if (q.wl !== undefined) o.wl = String(q.wl).slice(0, 60);
+        if (q.sm !== undefined) { const v = String(q.sm).trim(); if (v && !/^https:[/][/]/.test(v)) return E("Story image must be https"); o.sm = v.slice(0, 500) }
+        for (const k of ["adn", "adm"]) if (o[k] !== undefined && !(Number.isInteger(o[k]) && o[k] >= 1 && o[k] <= 50)) return E(k == "adn" ? "Videos per round must be a whole number from 1 to 50" : "Rounds per day must be a whole number from 1 to 50");
+        if (o.adg !== undefined && o.adg > 72) return E("The break can be 72 hours at most");
+        if (o.tkm !== undefined && !Number.isInteger(o.tkm)) return E("Task ad views per day must be a whole number");
+        for (const k of ["ade", "tke"]) if (q[k] !== undefined) { if (!["0", "1"].includes(String(q[k]).trim())) return E("On/off must be 0 or 1"); o[k] = +q[k] }
+        if (q.adb !== undefined) { const v = String(q.adb).trim(); if (v && !/^[0-9]{1,12}$/.test(v)) return E("Reward Video block ID must be numbers only"); o.adb = v }
+        if (q.tkb !== undefined) { const v = String(q.tkb).trim(); if (v && !/^task-[0-9]{1,12}$/.test(v)) return E("Task ad block ID must look like task-123"); o.tkb = v }
+        const ks = Object.keys(o); if (ks.length) await db.batch(ks.map(k => P("INSERT OR REPLACE INTO s(k,v) VALUES(?,?)", k, String(o[k]))));
+        CC.d = null; break;
+      }
+      case "at": {
+        const n = await Q("SELECT COUNT(*) n FROM t WHERE o=0 AND st='a'"); if (n.n >= 10) return E("Max 10 daily tasks");
+        const url = String(q.url || "").trim(), rw = q.rw === "" || q.rw === undefined ? N("dtr") : +q.rw;
+        if (!/^https:[/][/]\S{3,480}$/.test(url) || !(rw > 0)) return E("Valid https link and reward needed");
+        await X("INSERT INTO t(url,rw,bl) VALUES(?,?,?)", url, rw, String(q.bl || "").trim().slice(0, 24)); break;
+      }
+      case "ae": {
+        const url = String(q.url || "").trim(), rw = +q.rw;
+        if (!/^https:[/][/]\S{3,480}$/.test(url) || !(rw > 0)) return E("Valid https link and reward needed");
+        await X("UPDATE t SET url=?,rw=?,bl=? WHERE id=? AND o=0 AND st='a'", url, rw, String(q.bl || "").trim().slice(0, 24), tid); break;
+      }
+      case "ad": await X("UPDATE t SET st='x' WHERE id=?", tid); break;
+      case "ap": await X("UPDATE t SET st=? WHERE id=? AND st='p'", OK ? "a" : "x", tid); break;
+      case "aw": {
+        const w = await Q("SELECT * FROM w WHERE id=? AND st='p'", tid); if (!w) return E("Already processed");
+        if (OK) { const r = await X("UPDATE w SET st='d' WHERE id=? AND st='p'", w.id); if (!r.meta.changes) return E("Already processed") }
+        else {
+          const g = "EXISTS(SELECT 1 FROM w WHERE id=? AND st='p')";
+          const r = await db.batch([HS(w.u, "refund", w.amt, "Withdraw rejected", g, [w.id]), P("UPDATE u SET b=ROUND(b+?,6) WHERE id=? AND " + g, w.amt, w.u, w.id), P("UPDATE w SET st='r' WHERE id=? AND st='p'", w.id)]);
+          if (r[1].meta.changes != 1) return E("Already processed");
+        }
+        await tg(env, "sendMessage", { chat_id: w.u, text: OK ? "✅ Your withdrawal of " + w.amt + " SPC was approved. The payout is sent manually by the admin." : "❌ Your withdrawal was rejected and " + w.amt + " SPC was refunded to your wallet." });
+        break;
+      }
+      case "ao": {
+        const o = await Q("SELECT * FROM o WHERE id=? AND st='p'", tid); if (!o) return E("Already processed");
+        if (!OK) await X("UPDATE o SET st='x' WHERE id=? AND st='p'", o.id);
+        else if (o.k == "rm") await X("UPDATE o SET st='x' WHERE id=? AND st='p'", o.id);
+        else {
+          const g = "EXISTS(SELECT 1 FROM o WHERE id=? AND st='p')";
+          const rv = await db.batch([P("UPDATE u SET vl=MAX(CASE WHEN vx>? THEN vl ELSE 0 END,?),vx=? WHERE id=? AND " + g, now, o.k == "v2" ? 2 : 1, FOREVER, o.u, o.id), P("UPDATE o SET st='a' WHERE id=? AND st='p'", o.id)]);
+          if (rv[1].meta.changes == 1) { await payCommission(db, c, o.u, "o:" + o.id, "vip", N(o.k == "v2" ? "vp2" : "vp1"), "usdt"); await notify(env, o.u, "\u{1F451} Your payment was approved. Your " + (o.k == "v2" ? "VVIP" : "VIP") + " badge is now active.") }
+        }
+        break;
+      }
+      case "aa": {
+        if (!(tid > 0)) return E("Enter a numeric Telegram ID");
+        if (String(tid) == MAIN) return E("Main admin cannot be changed");
+        if (ON) {
+          const rl = [...new Set(String(q.rl || "").split(",").map(x => x.trim()).filter(x => ["cfg", "tk", "us", "wd", "od", "st", "lg", "sa", "rt", "cm", "rw", "ru"].includes(x)))];
+          if (!rl.length) return E("Choose at least one role");
+          await X("INSERT INTO admins(id,by,ts,rl) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET rl=excluded.rl", tid, id, now, rl.join(","));
+        } else await X("DELETE FROM admins WHERE id=?", tid);
+        break;
+      }
+      case "sp": {
+        const pps = Math.round(Number(q.pps) * 1e6) / 1e6, kind = q.kd == "l" ? "l" : "p", nt = String(q.nt || "").trim().slice(0, 200);
+        if (!(pps > 0 && pps <= 1e7)) return E("Enter a valid amount per stock");
+        if (q.kd != "l") { const tot = Number((await Q("SELECT COALESCE(SUM(n),0) s FROM stk")).s) * pps; if (!(await capOk(db, tot))) return E(CAPMSG) }
+        if (await Q("SELECT 1 x FROM pl WHERE ts>? AND pps=? AND k=?", now - 15000, pps, kind)) return E("Duplicate entry blocked. Wait a few seconds.");
+        const no = "PL" + now + crypto.randomUUID().slice(0, 4), mk = "EXISTS(SELECT 1 FROM pl WHERE no=?)", hold = "(SELECT COALESCE(SUM(n),0) FROM stk)";
+        const st = [P("INSERT INTO pl(no,k,pps,nt,hold,tot,ts,aid) SELECT ?,?,?,?," + hold + "," + (kind == "p" ? hold + "*?" : "0") + ",?,? WHERE 1", ...(kind == "p" ? [no, kind, pps, nt, pps, now, id] : [no, kind, pps, nt, now, id]))];
+        if (kind == "p") st.push(P("INSERT INTO h(u,k,amt,ts,n,rt) SELECT u,'farm',ROUND(n*?,6),?,?,? FROM stk WHERE n>0 AND " + mk, pps, now, nt.slice(0, 40) || "Profit share", String(c.urt), no),
+          P("UPDATE u SET b=ROUND(b+(SELECT n FROM stk WHERE u=u.id)*?,6) WHERE id IN (SELECT u FROM stk WHERE n>0) AND " + mk, pps, no));
+        await db.batch(st); MK.d = null; break;
+      }
+      case "sq": await X("INSERT OR REPLACE INTO s(k,v) VALUES('str',?)", String(q.str || "").slice(0, 3000)); CC.d = null; break;
+      case "so": {
+        const no = String(q.no || ""), o = await Q("SELECT * FROM inv WHERE no=? AND st='p' AND pm='usdt'", no); if (!o) return E("Already processed");
+        const g = "EXISTS(SELECT 1 FROM inv WHERE no=? AND st='p')";
+        if (OK) {
+          const r = await db.batch([P("INSERT OR IGNORE INTO stk(u,n) SELECT ?,0 WHERE " + g, o.u, no), P("UPDATE stk SET n=n+? WHERE u=? AND " + g, o.q, o.u, no),
+            P("INSERT INTO stl(u,k,q,n,ts) SELECT ?,?,?,?,? WHERE " + g, o.u, "buy", o.q, "USDT", now, no), P("UPDATE inv SET st='a',ts=? WHERE no=? AND st='p'", now, no)]);
+          if (r[3].meta.changes != 1) return E("Already processed");
+          await payCommission(db, c, o.u, "inv:" + no, "stock", +o.tot, "usdt");
+        } else {
+          const r = await db.batch([P("UPDATE s SET v=CAST(MAX(0,CAST(v AS INTEGER)-?) AS TEXT) WHERE k='_sold' AND " + g, o.q, no), P("UPDATE inv SET st='x' WHERE no=? AND st='p'", no)]);
+          if (r[1].meta.changes != 1) return E("Already processed");
+        }
+        await tg(env, "sendMessage", { chat_id: o.u, text: OK ? "✅ Your SPC Farm stock order (" + o.q + " stock) was approved. Download your invoice in the Farm tab." : "❌ Your SPC Farm stock order was rejected." });
+        MK.d = null; break;
+      }
+      case "sx": {
+        ex = (await P("SELECT stk.u id,u.n,u.un,IIF(u.vx>?,u.vl,0) lv,stk.n stocks,stk.fr fr,(SELECT COALESCE(SUM(tot),0) FROM inv WHERE inv.u=stk.u AND inv.pm='coin' AND inv.st='a') coins,(SELECT COALESCE(SUM(tot),0) FROM inv WHERE inv.u=stk.u AND inv.pm='usdt' AND inv.st='a') usdt FROM stk JOIN u ON u.id=stk.u WHERE stk.n>0 ORDER BY stk.n DESC LIMIT 5000", now).all()).results; break;
+      }
+      case "au": usr = await find(q.s); if (!usr) return E("User not found"); break;
+      case "ab": {
+        const t = await find(String(tid)); if (!t) return E("User not found");
+        if (String(t.id) == MAIN || t.isa) return E("Admins cannot be blocked");
+        await X("UPDATE u SET bn=? WHERE id=?", ON ? 1 : 0, t.id); usr = await find(String(t.id)); break;
+      }
+      case "ag": {
+        const t = await find(String(tid)); if (!t) return E("User not found");
+        const m = Math.round(Number(q.amt) * 1e6) / 1e6; if (!Number.isFinite(m) || m == 0 || Math.abs(m) > 1e9) return E("Enter a valid amount");
+        if (m > 0) { if (!(await capOk(db, m))) return E(CAPMSG); const lbl = String(q.lb || "").trim().slice(0, 30) || "Admin Gift"; await X("INSERT INTO gf(u,amt,lb,ts) VALUES(?,?,?,?)", t.id, m, lbl, now); await notify(env, t.id, "\u{1F381} You received a reward: " + lbl + " (+" + nf(m) + " SPC). Open the app and tap Claim!"); usr = await find(String(t.id)); break }
+        const g = m > 0 ? "EXISTS(SELECT 1 FROM u WHERE id=?)" : "(SELECT b FROM u WHERE id=?)>=?", gb = m > 0 ? [t.id] : [t.id, -m];
+        const r = await db.batch([HS(t.id, "admin", m, "Admin", g, gb), P("UPDATE u SET b=ROUND(b+?,6) WHERE id=? AND " + g, m, t.id, ...gb)]);
+        if (r[1].meta.changes != 1) return E("User balance is too low"); usr = await find(String(t.id)); break;
+      }
+    }
+    const r = await db.batch([
+      can("tk") ? P("SELECT * FROM t WHERE st IN('a','p') ORDER BY st DESC,id DESC LIMIT 80") : P("SELECT 1 x WHERE 0"),
+      can("wd") ? P("SELECT w.*,IIF(u.vx>?,u.vl,0) lv FROM w JOIN u ON u.id=w.u WHERE w.st='p' ORDER BY lv DESC,w.id LIMIT 100", now) : P("SELECT 1 x WHERE 0"),
+      can("od") ? P("SELECT * FROM o WHERE st='p' ORDER BY id LIMIT 100") : P("SELECT 1 x WHERE 0"),
+      isMain ? P("SELECT id,rl FROM admins ORDER BY id") : P("SELECT 1 x WHERE 0"),
+      P("SELECT COUNT(*) n FROM u"),
+      can("st") ? P("SELECT no,u,q,tot,tx,nm,ts FROM inv WHERE st='p' AND pm='usdt' ORDER BY ts LIMIT 100") : P("SELECT 1 x WHERE 0")]);
+    return J({ c: await getC(db, true), tk: r[0].results, w: r[1].results, od: r[2].results, ad: r[3].results, n: r[4].results[0].n, so: r[5].results, main: MAIN, im: isMain, rl: isMain ? [] : [...roles], usr, ex, gfx: can("rw") ? (await P("SELECT g.id,g.u,g.amt,g.lb,g.ts,g.st,u.n FROM gf g LEFT JOIN u ON u.id=g.u ORDER BY g.id DESC LIMIT 15").all()).results : [], cmx: can("cm") ? { pool: +((await Q("SELECT b FROM cp WHERE id=1")) || { b: 0 }).b, ...(await Q("SELECT COALESCE(SUM(st='u'),0) un,COALESCE(SUM(st='p'),0) pn,COALESCE(SUM(CASE WHEN st='p' THEN amt END),0) pa,COALESCE(SUM(CASE WHEN st='u' THEN amt END),0) ua FROM cm")) } : null, sup: can("rt") ? { total: TOTAL_SUPPLY, cap: COMMUNITY_CAP, held: await heldSum(db, true) } : null });
+  }
+
+  // ------------------------------------------------------------ user actions
+  switch (a) {
+    case "me": break;
+    case "gd": await X("UPDATE u SET gd=1 WHERE id=?", id); break;
+    case "ms": await db.batch([P("INSERT OR IGNORE INTO mining(u,st) VALUES(?,0)", id), P("UPDATE mining SET st=? WHERE u=? AND st=0", now, id)]); await refCheck(db, env, c, id); break;
+    case "mc": {
+      if (!u.mst) return E("Start mining first");
+      const m0 = Math.floor(Math.min(now - u.mst, 864e5) * er / 864e5 * 1e6) / 1e6, m = R6(m0 * mult);
+      if (!(m0 >= N("minc"))) return E("Minimum claim " + c.minc + " SPC");
+      if (!(await capOk(db, m))) return E(CAPMSG);
+      const g = "(SELECT st FROM mining WHERE u=?)=?", gb = [id, u.mst];
+      const r = await db.batch([HS(id, "mc", m, "", g, gb), P("UPDATE u SET b=ROUND(b+?,6) WHERE id=? AND " + g, m, id, ...gb), P("UPDATE mining SET st=0 WHERE u=? AND st=?", id, u.mst)]);
+      if (r[1].meta.changes != 1) return E("Already claimed");
+      break;
+    }
+    case "ts": case "tc": {
+      const t = await Q("SELECT * FROM t WHERE id=? AND st='a'", +q.t); if (!t) return E("Task closed");
+      if (t.o == id) return E("You cannot claim your own promo");
+      const yy = t.q ? "0" : today;
+      if (a == "ts") { await X("INSERT OR IGNORE INTO d(u,t,y,s) VALUES(?,?,?,?)", id, t.id, yy, now); break }
+      const k = await Q("SELECT s,c FROM d WHERE u=? AND t=? AND y=?", id, t.id, yy);
+      if (!k) return E("Visit the link first"); if (k.c) return E("Already claimed");
+      if (now - k.s < N("secs") * 1e3) return E("Wait " + Math.ceil(N("secs") - (now - k.s) / 1e3) + "s");
+      const rwd = R6(+t.rw * mult); if (!(await capOk(db, rwd))) return E(CAPMSG);
+      const g = "EXISTS(SELECT 1 FROM d WHERE u=? AND t=? AND y=? AND c=0)", gb = [id, t.id, yy];
+      const st = [HS(id, "task", rwd, "", g, gb), P("UPDATE u SET b=ROUND(b+?,6) WHERE id=? AND " + g, rwd, id, ...gb)];
+      if (t.o) st.push(P("UPDATE t SET l=l-1,st=IIF(l<=1,'x','a') WHERE id=? AND " + g, t.id, ...gb));
+      st.push(P("UPDATE d SET c=1 WHERE u=? AND t=? AND y=? AND c=0", ...gb));
+      const r = await db.batch(st); if (r[1].meta.changes != 1) return E("Already claimed");
+      await notify(env, id, "\u2705 Task reward: +" + nf(rwd) + " SPC was added to your wallet.");
+      await refCheck(db, env, c, id);
+      break;
+    }
+    case "ck": {
+      if (u.c) return E("Already verified");
+      for (const x of chs(c.ch)) {
+        const r = await tg(env, "getChatMember", { chat_id: x, user_id: id });
+        if (!r || !r.ok) return E("Cannot verify " + x + " (the bot must be admin there)");
+        const s = r.result.status; if (s == "left" || s == "kicked" || (s == "restricted" && !r.result.is_member)) return E("Join all channels first");
+      }
+      const ref = u.r && u.r != id ? await Q("SELECT id FROM u WHERE id=?", u.r) : null, g = "(SELECT c FROM u WHERE id=?)=0", st = [];
+      st.push(P("UPDATE u SET c=1 WHERE id=? AND c=0", id)); await db.batch(st);
+      await refCheck(db, env, c, id);
+      break;
+    }
+    case "rc": {
+      const p = +u.p; if (!(p > 0)) return E("Nothing to claim");
+      if (!(await capOk(db, p))) return E(CAPMSG);
+      const g = "(SELECT p FROM u WHERE id=?)>=?";
+      const r = await db.batch([HS(id, "referral", p, "", g, [id, p]), P("UPDATE u SET b=ROUND(b+?,6),p=ROUND(p-?,6) WHERE id=? AND " + g, p, p, id, id, p)]);
+      if (r[1].meta.changes != 1) return E("Try again");
+      await notify(env, id, "\u{1F4B0} Referral reward: +" + nf(p) + " SPC was added to your wallet."); break;
+    }
+    case "pr": {
+      const pay = q.pay, pl = PL[pay == "f" ? 2 : +q.p], url = String(q.url || "").trim();
+      if (!pl || !/^https:[/][/]\S{3,480}$/.test(url)) return E("Enter a valid https link");
+      const ti = (tx, g, gb) => P("INSERT INTO t(url,rw,o,l,q,st,x) SELECT ?,?,?,?,?,?,? WHERE " + g, url, N("prw"), id, pl.v, pl.q, tx ? "p" : "a", tx ? (+q.p + "|" + tx) : "", ...gb);
+      if (pay == "f") {
+        if (lv < 2) return E("Free monthly promo is for VVIP only");
+        const mk = today.slice(0, 7), g = "COALESCE((SELECT fm FROM u WHERE id=?),'')!=?", gb = [id, mk];
+        const r = await db.batch([ti("", g, gb), P("UPDATE u SET fm=? WHERE id=? AND " + g, mk, id, ...gb)]);
+        if (r[0].meta.changes != 1) return E("Free monthly promo already used");
+      } else if (pay == "c") {
+        const k = Math.round(pl.c * (lv ? 1 - N("disc") / 100 : 1)), g = "(SELECT b FROM u WHERE id=?)>=?", gb = [id, k];
+        const r = await db.batch([HS(id, "promo", -k, "", g, gb), ti("", g, gb), P("UPDATE u SET b=ROUND(b-?,6) WHERE id=? AND " + g, k, id, ...gb)]);
+        if (r[2].meta.changes != 1) return E("Not enough coins");
+      } else if (pay == "u") {
+        const tx = String(q.tx || "").trim().toLowerCase(); if (!/^0x[0-9a-f]{64}$/.test(tx)) return E("Enter a valid USDT TX hash");
+        const r = await db.batch([ti(tx, "NOT EXISTS(SELECT 1 FROM txs WHERE tx=?)", [tx]), P("INSERT OR IGNORE INTO txs(tx,k,u,ts) VALUES(?,?,?,?)", tx, "promo", id, now)]);
+        if (r[0].meta.changes != 1) return E("This TX hash was already used");
+      } else return E("Choose a payment method");
+      break;
+    }
+    case "wd": {
+      if (String(c.wd) != "1") return E("Withdrawal Start in 2027");
+      { const cm = await chanCheck(env, id, c); if (cm) return E(cm) }
+      const m = Math.round(+q.amt * 1e6) / 1e6, ad = String(q.ad || "").trim();
+      if (!(m >= N("minw"))) return E("Minimum withdraw " + c.minw);
+      if (!/^0x[a-fA-F0-9]{40}$/.test(ad)) return E("Enter a valid BEP20 address (0x...)");
+      const g = "(SELECT b FROM u WHERE id=?)>=?", gb = [id, m];
+      const r = await db.batch([HS(id, "withdraw", -m, ad.slice(0, 8) + "…", g, gb), P("INSERT INTO w(u,amt,ad,ts) SELECT ?,?,?,? WHERE " + g, id, m, ad, now, ...gb), P("UPDATE u SET b=ROUND(b-?,6) WHERE id=? AND " + g, m, id, ...gb)]);
+      if (r[2].meta.changes != 1) return E("Not enough coins"); break;
+    }
+    case "sd": {
+      const m = Math.round(+q.amt * 1e6) / 1e6, to = String(q.to || "").replace(/^@/, "").trim().toLowerCase();
+      if (!(m > 0 && m >= N("mins"))) return E("Minimum send " + c.mins);
+      { const cm = await chanCheck(env, id, c); if (cm) return E(cm) }
+      const byId = /^[0-9]{5,15}$/.test(to);
+      if (!byId && !/^[a-z0-9_]{4,32}$/.test(to)) return E("Enter a valid @username or Telegram ID");
+      const v = byId ? await Q("SELECT id,un FROM u WHERE id=? AND rg=1", +to) : await Q("SELECT id,un FROM u WHERE un=?", to);
+      if (!v) return E("User not found (they must open the app once)");
+      if (v.id == id) return E("You cannot send to yourself");
+      const g = "(SELECT b FROM u WHERE id=?)>=?", gb = [id, m];
+      const r = await db.batch([HS(id, "sent", -m, v.un ? "@" + v.un : "ID " + v.id, g, gb), HS(v.id, "received", m, un ? "@" + un : "ID " + id, g, gb),
+        P("UPDATE u SET b=CASE WHEN id=? THEN ROUND(b-?,6) ELSE ROUND(b+?,6) END WHERE id IN (?,?) AND " + g, id, m, m, id, v.id, ...gb)]);
+      if (r[2].meta.changes != 2) return E("Not enough coins");
+      await notify(env, id, "\u{1F4E4} You sent " + nf(m) + " SPC to " + (v.un ? "@" + v.un : "ID " + v.id) + ".");
+      await notify(env, v.id, "\u{1F4E5} You received " + nf(m) + " SPC from " + (un ? "@" + un : nm) + "."); break;
+    }
+    case "bv": {
+      const t2 = q.k == "v2";
+      if (!t2 && lv > 0) return E("You already have a VIP badge");
+      if (t2 && lv > 1) return E("You already have VVIP");
+      const k = N(t2 ? "vc2" : "vc"), g = "(SELECT b FROM u WHERE id=?)>=?", gb = [id, k];
+      const r = await db.batch([HS(id, "vip", -k, t2 ? "VVIP" : "VIP", g, gb), P("UPDATE u SET b=ROUND(b-?,6),vl=?,vx=? WHERE id=? AND " + g, k, t2 ? 2 : 1, FOREVER, id, ...gb)]);
+      if (r[1].meta.changes != 1) return E("Not enough coins");
+      await payCommission(db, c, id, "bv:" + id + ":" + (t2 ? 2 : 1), "vip", k, "spc");
+      await notify(env, id, "\u{1F451} Your " + (t2 ? "VVIP" : "VIP") + " badge is now active. Thank you!"); break;
+    }
+    case "vo": {
+      const k = q.k, tx = String(q.tx || "").trim().toLowerCase();
+      if (!["v1", "v2"].includes(k)) return E("Invalid order");
+      if (!/^0x[0-9a-f]{64}$/.test(tx)) return E("Enter a valid USDT TX hash (0x + 64 hex)");
+      if ((k == "v1" && lv > 0) || (k == "v2" && lv > 1)) return E("You already have this badge");
+      const r = await db.batch([P("INSERT INTO o(u,k,tx,y) SELECT ?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM txs WHERE tx=?)", id, k, tx, today, tx), P("INSERT OR IGNORE INTO txs(tx,k,u,ts) VALUES(?,?,?,?)", tx, k, id, now)]);
+      if (r[0].meta.changes != 1) return E("This TX hash was already used"); break;
+    }
+    case "ss": {
+      if (!c.sm) return E("Story task is not ready yet"); if (now - u.sl < 6048e5) return E("Available once every 7 days");
+      await X("UPDATE u SET ss=? WHERE id=?", now, id); break;
+    }
+    case "sc": {
+      if (!u.ss || now - u.ss < N("secs") * 1e3 || now - u.sl < 6048e5) return E("Post the story first");
+      if (!(await capOk(db, N("srw")))) return E(CAPMSG);
+      const g = "(SELECT ss FROM u WHERE id=?)=?", gb = [id, u.ss];
+      const r = await db.batch([HS(id, "story", N("srw"), "", g, gb), P("UPDATE u SET b=ROUND(b+?,6),sl=?,ss=0 WHERE id=? AND " + g, N("srw"), now, id, ...gb)]);
+      if (r[1].meta.changes != 1) return E("Already claimed"); break;
+    }
+    case "fb": case "fu": case "ff": {
+      const free = a == "ff", usdt = a == "fu";
+      const qn = free ? 1 : Math.floor(+q.q);
+      if (!(qn >= 1 && qn <= 1000)) return E("Quantity must be between 1 and 1000");
+      const tt = N("stt"), sold = +((await Q("SELECT v FROM s WHERE k='_sold'")) || { v: 0 }).v;
+      if (sold + qn > tt) return E(tt - sold > 0 ? "Only " + (tt - sold) + " stock left" : "All stocks are sold out");
+      const no = invNo(), mk = "EXISTS(SELECT 1 FROM inv WHERE no=?)", sg = "(SELECT CAST(v AS INTEGER) FROM s WHERE k='_sold')+?<=?";
+      const ins = "INSERT INTO inv(no,u,q,pu,cu,tot,pm,tx,st,ts,nm,un,lv) SELECT ?,?,?,?,?,?,?,?,?,?,?,?,? WHERE ";
+      const bump = P("UPDATE s SET v=CAST(CAST(v AS INTEGER)+? AS TEXT) WHERE k='_sold' AND " + mk, qn, no);
+      const hold = P("INSERT OR IGNORE INTO stk(u,n) SELECT ?,0 WHERE " + mk, id, no);
+      if (free) {
+        if (lv < 2) return E("Free stock is for VVIP members only");
+        const g = "COALESCE((SELECT fr FROM stk WHERE u=?),0)=0 AND " + sg;
+        const r = await db.batch([P(ins + g, no, id, 1, 0, "SPC", 0, "free", "", "a", now, nm, un, lv, id, 1, tt), bump, hold,
+          P("UPDATE stk SET n=n+1,fr=1 WHERE u=? AND " + mk, id, no), P("INSERT INTO stl(u,k,q,n,ts) SELECT ?,?,?,?,? WHERE " + mk, id, "free", 1, "VVIP bonus", now, no)]);
+        if (r[0].meta.changes != 1) return E("Free stock already claimed"); break;
+      }
+      if (usdt) {
+        const tx = String(q.tx || "").trim().toLowerCase(); if (!/^0x[0-9a-f]{64}$/.test(tx)) return E("Enter a valid USDT TX hash (0x + 64 hex)");
+        const pr = N("spu"), g = "NOT EXISTS(SELECT 1 FROM txs WHERE tx=?) AND " + sg;
+        const r = await db.batch([P(ins + g, no, id, qn, pr, "USDT", Math.round(pr * qn * 1e6) / 1e6, "usdt", tx, "p", now, nm, un, lv, tx, qn, tt), bump, P("INSERT OR IGNORE INTO txs(tx,k,u,ts) SELECT ?,?,?,? WHERE " + mk, tx, "stock", id, now, no)]);
+        if (r[0].meta.changes != 1) return E("This TX hash was already used"); break;
+      }
+      const pr = N("spc"), tot = Math.round(pr * qn * 1e6) / 1e6;
+      if (u.b < tot) return E("Not enough coins (need " + tot + " SPC)");
+      const g = "(SELECT b FROM u WHERE id=?)>=? AND " + sg;
+      const r = await db.batch([P(ins + g, no, id, qn, pr, "SPC", tot, "coin", "", "a", now, nm, un, lv, id, tot, qn, tt), HS(id, "stock", -tot, qn + " stock", mk, [no]), bump, hold,
+        P("UPDATE stk SET n=n+? WHERE u=? AND " + mk, qn, id, no), P("INSERT INTO stl(u,k,q,n,ts) SELECT ?,?,?,?,? WHERE " + mk, id, "buy", qn, "SPC", now, no), P("UPDATE u SET b=ROUND(b-?,6) WHERE id=? AND " + mk, tot, id, no)]);
+      if (r[0].meta.changes != 1) return E("Not enough coins or stock sold out");
+      await payCommission(db, c, id, "inv:" + no, "stock", tot, "spc");
+      await notify(env, id, "\u{1F4C8} Stock purchase done: " + qn + " stock for " + nf(tot) + " SPC. Your invoice is in the Farm tab."); break;
+    }
+    case "xs": {
+      const qn = Math.floor(+q.q); if (!(qn >= 1 && qn <= 2000000)) return E("Enter a valid stock quantity");
+      const f = await findTo(q.to); if (f.e) return E(f.e);
+      const v = f.v; if (v.id == id) return E("You cannot send to yourself");
+      const g = "COALESCE((SELECT n FROM stk WHERE u=?),0)>=?", gb = [id, qn];
+      const r = await db.batch([P("INSERT OR IGNORE INTO stk(u,n) VALUES(?,0)", v.id),
+        P("INSERT INTO stl(u,k,q,n,ts) SELECT ?,?,?,?,? WHERE " + g, id, "sent", qn, v.un ? "@" + v.un : "ID " + v.id, now, ...gb),
+        P("INSERT INTO stl(u,k,q,n,ts) SELECT ?,?,?,?,? WHERE " + g, v.id, "recv", qn, un ? "@" + un : "ID " + id, now, ...gb),
+        P("UPDATE stk SET n=CASE WHEN u=? THEN n-? ELSE n+? END WHERE u IN (?,?) AND " + g, id, qn, qn, id, v.id, ...gb)]);
+      if (r[3].meta.changes != 2) return E("Not enough stocks"); break;
+    }
+    case "wb": {
+      if (!(u.ts > 0 && now - u.ts < 6048e5)) return E("The welcome bonus period has ended");
+      const need = N("wbf"), rw = N("wbr"); if (!(rw > 0)) return E("Welcome bonus is off");
+      if (need > 0 && (await Q("SELECT COUNT(*) n FROM refs WHERE referrer=? AND st='s'", id)).n < need) return E("Invite " + need + " friends first");
+      if (!(await capOk(db, rw))) return E(CAPMSG);
+      const g = "(SELECT COUNT(*) FROM wb WHERE u=?)<7 AND NOT EXISTS(SELECT 1 FROM wb WHERE u=? AND y=?)", gb = [id, id, today];
+      const r = await db.batch([HS(id, "bonus", rw, "Welcome bonus", g, gb), P("UPDATE u SET b=ROUND(b+?,6) WHERE id=? AND " + g, rw, id, ...gb), P("INSERT INTO wb(u,y) SELECT ?,? WHERE " + g, id, today, ...gb)]);
+      if (r[1].meta.changes != 1) return E("Already claimed today (or all 7 claimed)"); break;
+    }
+    case "gc": {
+      const gf = await Q("SELECT id,amt,lb FROM gf WHERE id=? AND u=? AND st='p'", Math.floor(+q.id), id);
+      if (!gf) return E("This reward was already claimed");
+      const g = "EXISTS(SELECT 1 FROM gf WHERE id=? AND u=? AND st='p')", gb = [gf.id, id];
+      const r = await db.batch([HS(id, "gift", gf.amt, gf.lb, g, gb), P("UPDATE u SET b=ROUND(b+?,6) WHERE id=? AND " + g, gf.amt, id, ...gb), P("UPDATE gf SET st='c',ct=? WHERE id=? AND u=? AND st='p'", now, gf.id, id)]);
+      if (r[1].meta.changes != 1) return E("This reward was already claimed"); break;
+    }
+    case "wn": {
+      const amt = N("wbn");
+      if (u.wc !== 0 || !(amt > 0)) return E("The welcome bonus is not available");
+      if (!(await capOk(db, amt))) return E(CAPMSG);
+      const g = "(SELECT wc FROM u WHERE id=?)=0", gb = [id];
+      const r = await db.batch([HS(id, "bonus", amt, "Welcome bonus", g, gb), P("UPDATE u SET b=ROUND(b+?,6),wc=1 WHERE id=? AND " + g, amt, id, ...gb)]);
+      if (r[1].meta.changes != 1) return E("The welcome bonus was already claimed"); break;
+    }
+    case "ci": {
+      if (u.cd == today) return E("You already checked in today");
+      const yst = new Date(now - 864e5).toISOString().slice(0, 10), sk = u.cd == yst ? (+u.cs || 0) : 0, day = sk >= 7 ? 1 : sk + 1, amt = N("ci" + day);
+      if (!(amt > 0)) return E("The check-in reward is not set");
+      if (!(await capOk(db, amt))) return E(CAPMSG);
+      const g = "(SELECT cd FROM u WHERE id=?)=?", gb = [id, u.cd || ""];
+      const r = await db.batch([HS(id, "checkin", amt, "Day " + day, g, gb), P("INSERT OR IGNORE INTO ci(u,y,d,amt,ts) SELECT ?,?,?,?,? WHERE " + g, id, today, day, amt, now, ...gb), P("UPDATE u SET b=ROUND(b+?,6),cs=?,cd=? WHERE id=? AND " + g, amt, day, today, id, ...gb)]);
+      if (r[2].meta.changes != 1) return E("You already checked in today");
+      await notify(env, id, "\u{1F5D3} Daily check-in Day " + day + ": +" + nf(amt) + " SPC was added to your wallet."); break;
+    }
+    case "avs": {
+      if (!(N("ade") == 1) || !/^[0-9]{1,12}$/.test(String(c.adb))) return E("Reward video is not available now");
+      await X("INSERT OR IGNORE INTO ad(u) VALUES(?)", id);
+      const av = await Q("SELECT y,rd,n,bk,st FROM ad WHERE u=?", id), rd0 = av.y == today ? (+av.rd || 0) : 0;
+      if (rd0 >= N("adm")) return E("You reached today's video limit. Come back tomorrow");
+      if (+av.bk > now) return E("The next video is not ready yet");
+      await X("UPDATE ad SET st=?,y=?,rd=? WHERE u=?", now, today, rd0, id); break;
+    }
+    case "avc": {
+      const av = await Q("SELECT y,rd,n,bk,st FROM ad WHERE u=?", id);
+      if (!av || !(+av.st > 0)) return E("Start the video first");
+      const el = now - av.st;
+      if (el < 5000) return E("Please watch the video to the end");
+      if (el > 36e5) { await X("UPDATE ad SET st=0 WHERE u=? AND st=?", id, av.st); return E("This video expired. Please start again") }
+      const rd0 = av.y == today ? (+av.rd || 0) : 0, amt = N("adr");
+      if (rd0 >= N("adm") || +av.bk > now) return E("The next video is not ready yet");
+      const n2 = (+av.n || 0) + 1, fin = n2 >= N("adn"), nn = fin ? 0 : n2, nrd = fin ? rd0 + 1 : rd0, nbk = fin ? now + N("adg") * 36e5 : 0;
+      if (amt > 0 && !(await capOk(db, amt))) return E(CAPMSG);
+      const g = "(SELECT st FROM ad WHERE u=?)=?", gb = [id, av.st];
+      const r = await db.batch([
+        amt > 0 ? HS(id, "ad", amt, "Reward video", g, gb) : P("SELECT 1"),
+        amt > 0 ? P("UPDATE u SET b=ROUND(b+?,6) WHERE id=? AND " + g, amt, id, ...gb) : P("SELECT 1"),
+        P("UPDATE ad SET st=0,y=?,rd=?,n=?,bk=? WHERE u=? AND st=?", today, nrd, nn, nbk, id, av.st)]);
+      if (r[2].meta.changes != 1) return E("This reward was already claimed"); break;
+    }
+    default: return E("Unknown action");
+  }
+  const r = await db.batch([P(SEL, id),
+    P("SELECT t.id,t.url,t.rw,t.o,t.q,t.bl,d.s,d.c dc FROM t LEFT JOIN d ON d.u=? AND d.t=t.id AND d.y=IIF(t.q=1,'0',?) WHERE t.st='a' AND t.o!=? AND NOT (t.o>0 AND d.c=1) ORDER BY t.o,t.id LIMIT 40", id, today, id),
+    P("SELECT COUNT(*) n,COALESCE(SUM(st='p'),0) p,COALESCE(SUM(st='s'),0) s,COALESCE(SUM(CASE WHEN st='s' THEN rw END),0) e FROM refs WHERE referrer=?", id),
+    P("SELECT n,fr FROM stk WHERE u=?", id),
+    P("SELECT COUNT(*) n,COALESCE(SUM(y=?),0) t FROM wb WHERE u=?", today, id),
+    P("SELECT id,amt,lb FROM gf WHERE u=? AND st='p' ORDER BY id LIMIT 5", id),
+    P("SELECT y,rd,n,bk,st FROM ad WHERE u=?", id)]);
+  u = r[0].results[0]; const l2 = u.vx > Date.now() ? u.vl : 0;
+  const yst2 = new Date(Date.now() - 864e5).toISOString().slice(0, 10), alive = u.cd == today || u.cd == yst2, skn = alive ? (+u.cs || 0) : 0, dn = u.cd == today, cnt = !dn && skn >= 7 ? 0 : skn;
+  const a6 = r[6].results[0] || {}, adv = { on: N("ade") == 1 && /^[0-9]{1,12}$/.test(String(c.adb)), rd: a6.y == today ? (+a6.rd || 0) : 0, n: +a6.n || 0, bk: +a6.bk || 0, max: N("adm"), per: N("adn"), rw: N("adr"), gap: N("adg") };
+  const ck = { done: dn, n: cnt, nd: dn ? skn : cnt + 1, rw: [1, 2, 3, 4, 5, 6, 7].map(i => N("ci" + i)) };
+  return J({ lc: await liveCounters(db), u: { id: u.id, n: u.n, un: u.un, b: u.b, p: u.p, c: u.c, r: u.r, sl: u.sl, ss: u.ss, mst: u.mst, mn: u.mn, gd: u.gd }, c, tk: r[1].results, rf: r[2].results[0].s, rfs: r[2].results[0], sk: r[3].results[0] || { n: 0, fr: 0 }, wb: { n: r[4].results[0].n, t: r[4].results[0].t, on: u.ts > 0 && Date.now() - u.ts < 6048e5, end: u.ts + 6048e5, rw: N("wbr"), need: N("wbf") }, bot: BOT_USER, now: Date.now(), adm, lv: l2, er: (l2 ? N("vr") : N("rate")) * (1 + Math.min(100, 5 * (+u.rc || 0)) / 100), bst: Math.min(100, 5 * (+u.rc || 0)), gf: r[5].results, wn: u.wc === 0 ? N("wbn") : 0, ck, ad: adv });
+}
+
+// ---------------------------------------------------------------- invoice PDF (no external libraries)
+async function invoice(U, env) {
+  const db = env.DB; if (!db || !env.BOT_TOKEN) return new Response("Server is not configured", { status: 500 });
+  const IP = new URLSearchParams(U.searchParams.get("i") || ""), us = await ver(IP, env.BOT_TOKEN);
+  if (!us) return new Response("Open the app from Telegram", { status: 401 });
+  await init(db);
+  const no = String(U.searchParams.get("n") || "").slice(0, 40);
+  const iv = await db.prepare("SELECT * FROM inv WHERE no=? AND st='a'").bind(no).first();
+  if (!iv) return new Response("Invoice not found", { status: 404 });
+  if (iv.u != us.id && String(us.id) != String(env.ADMIN_ID || MAIN_ADMIN)) return new Response("Forbidden", { status: 403 });
+  return new Response(buildInvoice(iv), { headers: { "content-type": "application/pdf", "content-disposition": 'attachment; filename="' + no.replace(/[^A-Za-z0-9-]/g, "") + '.pdf"', "cache-control": "no-store" } });
+}
+function buildInvoice(iv) {
+  const pe = s => String(s == null ? "" : s).replace(/[^\x20-\x7e]/g, "?").replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
+  const tw = (s, z, b) => s.length * z * (b ? 0.58 : 0.5), fmt = n => Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const cs = [], DK = "0.02 0.09 0.06", MD = "0.07 0.30 0.20", GD = "0.86 0.69 0.26", LT = "0.9 1 0.95", GR = "0.33 0.40 0.36", WH = "1 1 1";
+  const rect = (x, y, w, h, c) => cs.push(c + " rg " + x + " " + y + " " + w + " " + h + " re f");
+  const box = (x, y, w, h, c, lw) => cs.push(c + " RG " + lw + " w " + x + " " + y + " " + w + " " + h + " re S");
+  const ln = (x1, y1, x2, y2, c, lw) => cs.push(c + " RG " + lw + " w " + x1 + " " + y1 + " m " + x2 + " " + y2 + " l S");
+  const tx = (x, y, z, f, c, s, al) => { s = pe(s); const w = tw(s, z, f == "F2"); if (al == "r") x -= w; else if (al == "c") x -= w / 2; cs.push("BT /" + f + " " + z + " Tf " + c + " rg " + x.toFixed(1) + " " + y + " Td (" + s + ") Tj ET") };
+  const circ = (cx, cy, r, c, lw) => { const k = 0.5523 * r, p = n => n.toFixed(1); cs.push(c + " RG " + lw + " w " + p(cx + r) + " " + p(cy) + " m " + p(cx + r) + " " + p(cy + k) + " " + p(cx + k) + " " + p(cy + r) + " " + p(cx) + " " + p(cy + r) + " c " + p(cx - k) + " " + p(cy + r) + " " + p(cx - r) + " " + p(cy + k) + " " + p(cx - r) + " " + p(cy) + " c " + p(cx - r) + " " + p(cy - k) + " " + p(cx - k) + " " + p(cy - r) + " " + p(cx) + " " + p(cy - r) + " c " + p(cx + k) + " " + p(cy - r) + " " + p(cx + r) + " " + p(cy - k) + " " + p(cx + r) + " " + p(cy) + " c S") };
+  const wrap = (s, n) => { const o = []; let l = ""; for (const w of s.split(" ")) { if ((l + " " + w).trim().length > n) { o.push(l); l = w } else l = (l + " " + w).trim() } if (l) o.push(l); return o };
+  const free = iv.pm == "free", tier = ["Standard", "VIP", "VVIP"][iv.lv || 0] || "Standard";
+  const date = new Date(iv.ts).toISOString().replace("T", " ").slice(0, 16) + " UTC";
+  const method = iv.pm == "coin" ? "SPC Coins (wallet)" : iv.pm == "usdt" ? "USDT (BEP20)" : "VVIP Free Bonus";
+  // header band with spider web
+  rect(0, 722, 595, 120, DK);
+  cs.push("q 0 722 595 120 re W n");
+  for (let i = 0; i < 14; i++) { const a = Math.PI * 2 * i / 14; ln(500, 800, (500 + Math.cos(a) * 170).toFixed(1), (800 + Math.sin(a) * 170).toFixed(1), MD, 0.7) }
+  for (let r = 28; r <= 168; r += 28) { let p = ""; for (let i = 0; i <= 14; i++) { const a = Math.PI * 2 * i / 14; p += (500 + Math.cos(a) * r).toFixed(1) + " " + (800 + Math.sin(a) * r).toFixed(1) + (i ? " l " : " m ") } cs.push(MD + " RG 0.7 w " + p + "S") }
+  cs.push("Q");
+  rect(0, 719, 595, 3, GD);
+  tx(40, 788, 28, "F2", GD, "SPIDER COIN");
+  tx(40, 766, 11, "F1", LT, "SPC FARM STOCK  |  OFFICIAL INVOICE");
+  tx(40, 742, 9, "F3", GD, "Vision 2037  -  Farming investment community");
+  tx(555, 790, 24, "F2", WH, "INVOICE", "r");
+  tx(555, 770, 10, "F1", LT, "No: " + iv.no, "r");
+  tx(555, 755, 9, "F1", LT, "Date: " + date, "r");
+  tx(555, 741, 9, "F2", GD, "Status: " + (free ? "COMPLIMENTARY" : "PAID"), "r");
+  // billed to / payment
+  tx(40, 690, 8, "F2", GR, "BILLED TO");
+  tx(40, 672, 15, "F2", DK, iv.nm || "Member");
+  tx(40, 655, 10, "F1", GR, "Telegram ID: " + iv.u);
+  tx(40, 641, 10, "F1", GR, "Username: " + (iv.un ? "@" + iv.un : "-"));
+  tx(40, 627, 10, "F1", GR, "Membership: " + tier);
+  tx(555, 690, 8, "F2", GR, "PAYMENT", "r");
+  tx(555, 672, 12, "F2", DK, method, "r");
+  tx(555, 655, 10, "F1", GR, "Currency: " + iv.cu, "r");
+  // table
+  rect(40, 585, 515, 26, MD);
+  tx(52, 594, 9, "F2", WH, "DESCRIPTION"); tx(360, 594, 9, "F2", WH, "QTY", "r"); tx(450, 594, 9, "F2", WH, "UNIT PRICE", "r"); tx(545, 594, 9, "F2", WH, "TOTAL", "r");
+  tx(52, 560, 12, "F2", DK, "SPC Farm Stock"); tx(52, 545, 8.5, "F1", GR, "Farming investment - profit share paid in SPC coins");
+  tx(360, 560, 12, "F1", DK, String(iv.q), "r"); tx(450, 560, 11, "F1", DK, free ? "FREE" : fmt(iv.pu) + " " + iv.cu, "r"); tx(545, 560, 11, "F2", DK, fmt(iv.tot) + " " + iv.cu, "r");
+  ln(40, 532, 555, 532, "0.8 0.85 0.82", 0.8);
+  rect(330, 470, 225, 48, DK); tx(342, 500, 8, "F2", GD, "TOTAL"); tx(545, 482, 17, "F2", WH, fmt(iv.tot) + " " + iv.cu, "r");
+  if (iv.tx) { tx(40, 505, 8, "F2", GR, "TRANSACTION HASH"); tx(40, 492, 7.5, "F1", DK, iv.tx.slice(0, 34)); tx(40, 482, 7.5, "F1", DK, iv.tx.slice(34)) }
+  // information
+  tx(40, 440, 10, "F2", DK, "STOCK HOLDER INFORMATION");
+  ["Profit share is credited to your wallet in SPC coins as announced by the admin.", "Stock can be sent to and received from other members like coins.", "Holders receive a profit share only. Stock does not represent ownership of the project.", "Rules and market updates are published inside the SPC Farm tab."].forEach((s, i) => tx(40, 422 - i * 14, 8.5, "F1", GR, "-  " + s));
+  // vision
+  rect(40, 330, 515, 56, "0.93 0.98 0.95"); box(40, 330, 515, 56, GD, 1);
+  tx(297.5, 366, 13, "F2", DK, "VISION 2037", "c"); tx(297.5, 349, 9, "F1", GR, "Mission: one major action every year  |  progress update every 3 months", "c");
+  // disclaimer
+  tx(40, 306, 8, "F2", GR, "DISCLAIMER");
+  wrap("Participation in SPC Farm Stock is entirely voluntary and made by your own free choice. Because of technical reasons or any project problem, no person or the project team accepts liability for any profit or loss.", 112).forEach((s, i) => tx(40, 292 - i * 11, 8, "F1", GR, s));
+  tx(40, 235, 11, "F3", MD, "Thank you for being part of SPC Farm.");
+  // seal
+  circ(500, 240, 40, GD, 1.6); circ(500, 240, 34, GD, 0.6);
+  tx(500, 246, 8, "F2", MD, "SPC FARM", "c"); tx(500, 234, 9, "F2", MD, "VERIFIED", "c"); tx(500, 222, 8, "F2", MD, "2037", "c");
+  // footer
+  rect(0, 0, 595, 46, DK);
+  tx(297.5, 28, 9, "F1", WH, "Support: @" + ADMIN_USER + "   |   Bot: @" + BOT_USER, "c");
+  tx(297.5, 13, 7.5, "F3", GD, "This is a computer generated invoice and does not require a signature.", "c");
+  const content = cs.join("\n");
+  const objs = ["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 5 0 R /F2 6 0 R /F3 7 0 R >> >> /Contents 4 0 R >>",
+    "<< /Length " + content.length + " >>\nstream\n" + content + "\nendstream",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Oblique /Encoding /WinAnsiEncoding >>"];
+  let out = "%PDF-1.4\n"; const offs = [];
+  objs.forEach((o, i) => { offs.push(out.length); out += (i + 1) + " 0 obj\n" + o + "\nendobj\n" });
+  const xr = out.length;
+  out += "xref\n0 " + (objs.length + 1) + "\n0000000000 65535 f \n" + offs.map(o => String(o).padStart(10, "0") + " 00000 n \n").join("") + "trailer\n<< /Size " + (objs.length + 1) + " /Root 1 0 R >>\nstartxref\n" + xr + "\n%%EOF";
+  return new TextEncoder().encode(out);
+}
+
+// ---------------------------------------------------------------- frontend
+const HTML = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<script src="https://telegram.org/js/telegram-web-app.js"></script><script src="https://sad.adsgram.ai/js/sad.min.js"></script><title>Spider Coin</title>
+<style>
+:root{--a:#2dffa0;--bg:#030a06;--ln:#143826;--mu:#7aa88f;--rd:#ff5470;--gd:#f0d27a}
+*{box-sizing:border-box;margin:0;-webkit-tap-highlight-color:transparent}
+html{background:var(--bg)}
+body{font:14px/1.4 system-ui,sans-serif;color:#e8fff2;padding:0 12px calc(96px + env(safe-area-inset-bottom));min-height:100vh;max-width:480px;margin:0 auto;background:repeating-conic-gradient(from 0deg at 50% 0,rgba(45,255,160,.02) 0 1deg,transparent 1deg 14deg),repeating-radial-gradient(circle at 50% 0,rgba(45,255,160,.02) 0 1px,transparent 1px 44px),radial-gradient(120% 55% at 50% -8%,#0c4a2c 0,transparent 62%),var(--bg);background-attachment:fixed}
+.g{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(145px,1fr))}
+.c{background:linear-gradient(160deg,#0a1a12,#060f0a);border:1px solid var(--ln);border-radius:16px;padding:14px;margin-bottom:10px;box-shadow:0 6px 24px rgba(0,0,0,.35)}
+.b{width:100%;padding:12px;border:1px solid rgba(110,230,170,.28);border-radius:12px;background:linear-gradient(135deg,#0f7a50,#094a31);color:#eafff3;font-weight:800;font-size:15px;margin-top:4px;transition:transform .1s;box-shadow:0 4px 14px rgba(0,0,0,.45);text-shadow:0 1px 0 rgba(0,0,0,.35)}
+.b:active{transform:scale(.97)}.b:disabled{background:#12281c;color:var(--mu);box-shadow:none}
+.b.x{background:var(--rd);color:#fff;box-shadow:none}.b.gd{background:linear-gradient(135deg,#f6dc8d,#c79a3b);color:#2a1d02;box-shadow:0 4px 16px rgba(240,210,122,.22)}
+input,select{width:100%;padding:12px;margin:5px 0;border-radius:12px;border:1px solid var(--ln);background:#040c07;color:#e8fff2;font-size:16px}
+nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:480px;display:grid;grid-auto-flow:column;grid-auto-columns:1fr;background:rgba(5,14,9,.92);backdrop-filter:blur(10px);border-top:1px solid var(--ln);padding:6px 2px calc(6px + env(safe-area-inset-bottom))}
+nav a{display:flex;flex-direction:column;align-items:center;gap:3px;padding:7px 0;font-size:11px;color:var(--mu)}nav a.on{color:var(--a)}
+.big{font-size:clamp(28px,9vw,42px);font-weight:800;color:var(--a);font-variant-numeric:tabular-nums;letter-spacing:1px;margin:6px 0;text-shadow:0 0 18px rgba(45,255,160,.4)}
+.m{color:var(--mu);font-size:12px}h3{margin:14px 0 8px}
+header{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:10px;min-height:58px;margin:0 -12px;padding:6px 12px;background:rgba(3,10,6,.94);backdrop-filter:blur(8px);border-bottom:1px solid var(--ln)}
+.av{flex:none;width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#2dffa0,#0a8a52);color:#02140a;display:grid;place-items:center;font-weight:800;border:2px solid var(--gd)}
+.tt{flex:1;min-width:0;display:flex;flex-direction:column}.tt b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.tt span{font-size:12px;color:var(--mu);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pill{padding:6px 12px;border:1px solid var(--gd);border-radius:18px;font-weight:700;flex:none;font-variant-numeric:tabular-nums;color:var(--gd)}.pg{padding-top:12px}.gr{flex:none;width:36px;height:36px;border-radius:50%;border:1px solid var(--gd);color:var(--gd);display:grid;place-items:center;background:rgba(240,210,122,.06);cursor:pointer}.gr:active{transform:scale(.94)}#pp{position:fixed;inset:0;z-index:50;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.74);padding:18px}#pp.on{display:flex}.pbox{width:100%;max-width:340px;text-align:center;background:linear-gradient(160deg,#0b2217,#06120b);border:1px solid var(--gd);border-radius:22px;padding:26px 18px;box-shadow:0 0 40px rgba(45,255,160,.18)}.gift{font-size:64px;animation:gb 1.4s ease-in-out infinite}@keyframes gb{0%,100%{transform:translateY(0) rotate(-4deg)}50%{transform:translateY(-8px) rotate(4deg)}}
+.pl{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--a);animation:pl 1.2s infinite}@keyframes pl{50%{opacity:.25;transform:scale(1.6)}}
+.fi{animation:fi .22s}@keyframes fi{from{opacity:0;transform:translateY(8px)}}
+#ts{position:fixed;top:66px;left:50%;transform:translate(-50%,-16px);background:#0d2418;border:1px solid var(--a);padding:10px 16px;border-radius:20px;opacity:0;transition:.25s;pointer-events:none;z-index:9;font-weight:700;max-width:92%;text-align:center}#ts.on{opacity:1;transform:translate(-50%,0)}
+.r{display:flex;justify-content:space-between;gap:8px;align-items:center;overflow-wrap:anywhere;padding:6px 0}.r .b{width:auto;padding:8px 12px;font-size:13px;margin:0}
+.bd{display:inline-flex;align-items:center;gap:4px;padding:2px 9px 2px 7px;border-radius:20px;font-size:11px;font-weight:800;letter-spacing:.8px;vertical-align:middle;margin-left:6px}
+.bd.v1{background:linear-gradient(135deg,#f6dc8d,#c79a3b);color:#2a1d02;box-shadow:0 0 10px rgba(240,210,122,.45)}
+.bd.v2{background:linear-gradient(135deg,#eafff6,#7df0bd 50%,#2dd89a);color:#02241a;box-shadow:0 0 12px rgba(125,240,189,.6)}
+.bd.s{padding:1px 7px;font-size:10px}
+.mine{text-align:center;padding:18px 14px;background:radial-gradient(90% 60% at 50% 0,rgba(45,255,160,.15),transparent 70%),linear-gradient(160deg,#0a1f15,#050e09)}
+.st{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:20px;font-size:11px;font-weight:800;letter-spacing:1.5px;border:1px solid var(--ln);color:var(--mu)}
+.st.on{color:var(--a);border-color:rgba(45,255,160,.5);box-shadow:0 0 14px rgba(45,255,160,.25)}
+.ringw{position:relative;width:min(62vw,236px);aspect-ratio:1;margin:14px auto}
+.ring{width:100%;height:100%;transform:rotate(-90deg)}
+.rb{fill:none;stroke:#0f2a1d;stroke-width:10}
+.rf{fill:none;stroke:url(#gr);stroke-width:10;stroke-linecap:round;stroke-dasharray:553;stroke-dashoffset:553;transition:stroke-dashoffset .3s;filter:drop-shadow(0 0 6px rgba(45,255,160,.7))}
+.rin{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}.rin .big{font-size:clamp(22px,7vw,30px);margin:4px 0}
+.coin3{perspective:400px;height:54px}.coin3 svg{animation:sp 5s linear infinite}@keyframes sp{to{transform:rotateY(360deg)}}
+.stat3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:6px 0 12px}.stat3>div{background:#06120b;border:1px solid var(--ln);border-radius:12px;padding:9px 4px}.stat3 span{display:block;color:var(--mu);font-size:11px;letter-spacing:1px;text-transform:uppercase}.stat3 b{font-size:15px}
+.vcard{position:relative;overflow:hidden;border-radius:20px;padding:16px;aspect-ratio:1.586/1;min-height:214px;color:#eafff3;background:radial-gradient(120% 120% at 100% 0,#16c47a 0,transparent 55%),linear-gradient(135deg,#052e1c 0,#0a5a37 45%,#031a10 100%);border:1px solid rgba(240,210,122,.4);box-shadow:0 14px 40px rgba(0,0,0,.6),0 0 30px rgba(45,255,160,.12);display:flex;flex-direction:column;justify-content:space-between;margin-bottom:12px}
+.vcard::before{content:"";position:absolute;inset:0;background:repeating-conic-gradient(from 0deg at 100% 0,rgba(255,255,255,.05) 0 1deg,transparent 1deg 12deg),repeating-radial-gradient(circle at 100% 0,rgba(255,255,255,.05) 0 1px,transparent 1px 30px)}
+.vcard.v1{border-color:rgba(240,210,122,.85)}.vcard.v2{background:radial-gradient(120% 120% at 100% 0,#a8f7d6 0,transparent 50%),linear-gradient(135deg,#0b3b28 0,#16825a 40%,#06241a 100%);border-color:#d8f5e8}
+.sh{position:absolute;inset:0;background:linear-gradient(115deg,transparent 40%,rgba(255,255,255,.15) 50%,transparent 60%);transform:translateX(-100%);animation:sh 5s infinite}@keyframes sh{60%,100%{transform:translateX(100%)}}
+.vr{display:flex;justify-content:space-between;align-items:center;position:relative}
+.vbrand{font-weight:800;letter-spacing:3px;font-size:13px;color:var(--gd)}
+.vl{font-size:10px;letter-spacing:1.5px;color:#9fd6b8}.vn{font-size:13px;font-weight:700;letter-spacing:1px;text-transform:uppercase;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vamt{font-size:clamp(20px,6.6vw,28px);line-height:1.15;overflow-wrap:anywhere;font-weight:800;text-shadow:0 2px 10px rgba(0,0,0,.45);font-variant-numeric:tabular-nums;position:relative}
+.vno{font-family:ui-monospace,Menlo,monospace;letter-spacing:2px;font-size:14px;color:#d9fbe9;text-shadow:0 1px 0 rgba(0,0,0,.5);position:relative}
+.vcard>div{position:relative}
+.sg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:4px;background:#06120b;border:1px solid var(--ln);border-radius:14px;padding:4px;margin-bottom:10px}
+.sg a{padding:10px 0;text-align:center;border-radius:10px;color:var(--mu);font-weight:700;font-size:13px}.sg a.on{background:linear-gradient(135deg,#0f7a50,#094a31);color:#eafff3;box-shadow:inset 0 0 0 1px rgba(110,230,170,.35)}
+.tier{border-radius:16px;padding:16px;margin-bottom:10px}
+.tier.t1{background:linear-gradient(145deg,#1d1606,#0a0803);border:1px solid #c79a3b;box-shadow:0 0 22px rgba(240,210,122,.1)}
+.tier.t2{background:linear-gradient(145deg,#06241a,#030f0a);border:1px solid #7df0bd;box-shadow:0 0 24px rgba(125,240,189,.15)}
+.tier ul{list-style:none;padding:0;margin:10px 0}.tier li{padding:3px 0;color:#d9fbe9}
+.b.gd{border-color:rgba(255,230,150,.5)}.b.x{border-color:transparent}
+.dep{display:flex;gap:8px;align-items:center;background:#040c07;border:1px dashed #2e6b4c;border-radius:12px;padding:8px 8px 8px 12px;margin:6px 0}
+.dep code{flex:1;min-width:0;word-break:break-all;font:12px/1.35 ui-monospace,Menlo,monospace;color:#d9fbe9}
+.dep .b{width:auto;margin:0;padding:8px 14px;font-size:13px}
+.fh{position:relative;overflow:hidden;border-radius:20px;padding:18px;margin-bottom:12px;color:#eafff3;background:radial-gradient(120% 100% at 100% 0,rgba(240,210,122,.22),transparent 55%),linear-gradient(145deg,#0b3a29,#04160e 70%);border:1px solid rgba(240,210,122,.6);box-shadow:0 14px 34px rgba(0,0,0,.5)}
+.fh:before{content:"";position:absolute;inset:0;background:repeating-conic-gradient(from 0deg at 100% 0,rgba(240,210,122,.07) 0 1.5deg,transparent 1.5deg 13deg),repeating-radial-gradient(circle at 100% 0,rgba(240,210,122,.06) 0 1px,transparent 1px 34px);pointer-events:none}
+.fh>*{position:relative}
+.fhb{font-weight:900;letter-spacing:3px;font-size:19px;color:var(--gd)}
+.fht{font-size:12px;color:#9fd6b8;margin-bottom:12px}
+.fpr{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}.fpr>div{background:rgba(0,0,0,.3);border:1px solid rgba(240,210,122,.3);border-radius:12px;padding:8px 10px}.fpr span{display:block;font-size:9px;letter-spacing:1.5px;color:#9fd6b8}.fpr b{font-size:17px;color:#fff}
+.fbar{height:8px;border-radius:4px;background:rgba(0,0,0,.45);overflow:hidden;border:1px solid rgba(240,210,122,.25)}.fbar i{display:block;height:100%;background:linear-gradient(90deg,#128a58,#f0d27a)}
+.fst{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:10px 0;text-align:center}.fst b{display:block;font-size:15px}.fst span{font-size:10px;color:#9fd6b8;letter-spacing:1px;text-transform:uppercase}
+.fv{font-size:9px;letter-spacing:1.6px;color:var(--gd);text-align:center;border-top:1px solid rgba(240,210,122,.25);padding-top:10px;line-height:1.6}
+.cert{border-radius:16px;padding:16px;margin-bottom:12px;text-align:center;background:linear-gradient(145deg,#1b1507,#080602);border:1px solid #c79a3b;box-shadow:inset 0 0 0 4px #080602,inset 0 0 0 5px rgba(240,210,122,.4)}
+.cert .big{color:var(--gd);text-shadow:0 0 16px rgba(240,210,122,.3)}
+.mkst{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:8px 0}.mkst>div{background:#06120b;border:1px solid var(--ln);border-radius:12px;padding:8px 4px;text-align:center}.mkst b{display:block;font-size:15px}.mkst span{font-size:10px;color:var(--mu)}
+.pfu{color:#3ddc97}.pfd{color:var(--rd)}
+.wb .wbd{display:grid;grid-template-columns:repeat(7,1fr);gap:5px;margin:10px 0}.wb .wbd i{font-style:normal;text-align:center;padding:7px 0;border-radius:9px;background:#06120b;border:1px solid var(--ln);color:var(--mu);font-weight:800;font-size:12px}.wb .wbd i.on{background:linear-gradient(135deg,#f6dc8d,#c79a3b);color:#2a1d02;border-color:#c79a3b}
+.rules{white-space:pre-wrap;color:#d9fbe9;line-height:1.55;word-break:break-word}
+.disc{font-size:10.5px;line-height:1.5;color:var(--mu);border:1px solid var(--ln);border-radius:12px;padding:10px 12px;margin:4px 0 12px}
+.ck{display:inline-flex;align-items:center;gap:6px;margin:4px 12px 4px 0;font-size:13px}.ck input{width:auto;margin:0}
+textarea{width:100%;padding:12px;margin:5px 0;border-radius:12px;border:1px solid var(--ln);background:#040c07;color:#e8fff2;font-size:15px;font-family:inherit}
+.chp{display:inline-block;padding:2px 9px;border-radius:12px;font-size:10px;font-weight:800;letter-spacing:.5px}.chp.a{background:rgba(61,220,151,.15);color:#3ddc97}.chp.p{background:rgba(240,210,122,.15);color:var(--gd)}.chp.x{background:rgba(255,84,112,.15);color:var(--rd)}
+.adm .b{background:#0d6a45;box-shadow:none;text-shadow:none;overflow:visible;border:1px solid rgba(110,230,170,.3)}.adm .b:active{transform:none;opacity:.85}.adm .b.x{background:#a42a42;border-color:transparent}.adm .b.gd{background:#c79a3b;color:#2a1d02}.adm .b.bk{background:#0a1a12}.adm .b:disabled{background:#12281c}.adm .c{box-shadow:none}.gh{display:block;margin:12px 0 2px;color:var(--gd)}.ab{font-style:normal;background:var(--rd);color:#fff;border-radius:10px;padding:0 7px;font-size:12px;margin-left:6px}
+#gchip{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom));z-index:60;background:#c79a3b;color:#2a1d02;font-weight:700;padding:9px 16px;border-radius:20px;display:none}.hl{outline:3px solid #f6dc8d;outline-offset:3px;border-radius:14px;animation:hlp 1s ease-in-out 5}@keyframes hlp{50%{outline-color:transparent}}
+@media(prefers-reduced-motion:reduce){*{animation:none!important}}
+
+.b{position:relative;overflow:hidden;display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;border-radius:14px;border:1px solid rgba(150,255,200,.45);background:repeating-conic-gradient(from 180deg at 100% 0,rgba(255,255,255,.16) 0 .8deg,transparent .8deg 12deg),repeating-radial-gradient(circle at 100% 0,rgba(255,255,255,.12) 0 1px,transparent 1px 10px),linear-gradient(135deg,#14a86c,#0a5c3b);box-shadow:0 3px 0 #04301e,0 8px 18px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.25);color:#f2fff8;font-weight:800;letter-spacing:.2px;text-shadow:0 1px 0 rgba(0,0,0,.4);transition:transform .08s,box-shadow .08s;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.b:active{transform:translateY(2px);box-shadow:0 1px 0 #04301e,0 3px 8px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.2)}
+.b:disabled{background:#12281c;border-color:var(--ln);box-shadow:none;color:var(--mu);transform:none;text-shadow:none;cursor:default}
+.b.x{background:linear-gradient(135deg,#ff5470,#b3213c);border-color:rgba(255,160,175,.5);box-shadow:0 3px 0 #5a0f1f,0 8px 18px rgba(0,0,0,.5)}
+.b.busy{opacity:.75;pointer-events:none}
+.b.busy::after{content:'';width:14px;height:14px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:spn .7s linear infinite}
+@keyframes spn{to{transform:rotate(360deg)}}
+.b.bk{margin-bottom:10px;width:auto;min-height:40px;padding:8px 16px}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.g2 .b{width:100%}
+.sg a{border:1px solid transparent;cursor:pointer}
+.sg a:not(.on){border-color:var(--ln)}
+nav a{position:relative}
+nav a.dot::after{content:'';position:absolute;top:3px;left:calc(50% + 8px);width:9px;height:9px;border-radius:50%;background:var(--rd);box-shadow:0 0 0 2px #050e09}
+details.rl,details.fq{border:1px solid var(--ln);border-radius:12px;padding:9px 12px;margin:8px 0;background:#06120b}
+details summary{cursor:pointer;font-weight:700;list-style:none}
+details summary::-webkit-details-marker{display:none}
+details.rl summary span{color:var(--a);font-weight:600;font-size:12px;margin-left:6px}
+details[open] summary{margin-bottom:6px}
+.aboutc{position:relative;overflow:hidden;text-align:center;padding:20px 14px}
+.aboutc::before{content:'';position:absolute;top:0;right:0;bottom:0;left:0;background:repeating-conic-gradient(from 0deg at 50% 0,rgba(45,255,160,.12) 0 1deg,transparent 1deg 12deg),repeating-radial-gradient(circle at 50% 0,rgba(45,255,160,.12) 0 1px,transparent 1px 36px);pointer-events:none}
+.aboutc>*{position:relative}
+.aboutc h4{margin:14px 0 4px;color:var(--a)}
+html,body{overflow-x:hidden}.vcard{width:100%;box-sizing:border-box;min-width:0}
+body{min-height:100dvh}
+img,svg,canvas,video{max-width:100%}
+.c{overflow-wrap:anywhere}
+table{display:block;overflow-x:auto;max-width:100%}
+@media(min-width:768px){body{max-width:640px}nav{max-width:640px}}
+@media(min-width:1100px){body{max-width:760px}nav{max-width:760px}}
+@media(max-width:350px){body{padding:0 8px calc(96px + env(safe-area-inset-bottom))}header{margin:0 -8px;padding:0 8px}.b{min-height:40px;font-size:13px;padding:8px 10px}nav a{font-size:10px}.sg a{font-size:11px}.g2{grid-template-columns:1fr}}
+#sh{position:fixed;inset:0;z-index:60;display:none}#sh.on{display:block}#sh .bd{position:absolute;inset:0;background:rgba(0,0,0,.6)}#sh .sb{position:absolute;left:50%;transform:translateX(-50%);bottom:0;width:100%;max-width:480px;max-height:88vh;overflow:auto;box-sizing:border-box;background:linear-gradient(180deg,#0b2217,#06120b);border-top:1px solid var(--gd);border-radius:22px 22px 0 0;padding:16px 16px calc(18px + env(safe-area-inset-bottom));animation:shup .28s ease-out}#sh .sb .c{border:0;background:none;box-shadow:none;padding:0;margin:0}@keyframes shup{from{transform:translate(-50%,100%)}to{transform:translate(-50%,0)}}adsgram-task{display:block;width:100%}
+.ic{display:block;flex:none;object-fit:contain}
+.hero{text-align:center;padding:20px 14px;margin-bottom:10px;border:1px solid var(--ln);border-radius:18px;background:radial-gradient(90% 90% at 50% 0,rgba(45,255,160,.16),transparent 70%),linear-gradient(160deg,#0a1a12,#060f0a)}
+.hb{font-size:clamp(30px,10vw,42px);font-weight:800;color:var(--a);font-variant-numeric:tabular-nums;line-height:1.15;margin:4px 0;text-shadow:0 0 16px rgba(45,255,160,.35);overflow-wrap:anywhere}
+.hs{font-size:13px;color:var(--mu)}
+.hero.sm{padding:12px 14px}.hero.sm .hb{font-size:26px}
+.sec{font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--mu);margin:16px 4px 8px}
+.dc{padding:10px 12px;margin-bottom:8px}
+.dr{display:flex;align-items:center;gap:12px}
+.dr .tx,.dbl .tx{flex:1;min-width:0}
+.dr .tx b,.dbl .tx b{display:block;font-size:15px}
+.dr .tx .m,.dbl .tx .m{display:block;line-height:1.35}
+.dr .b{width:auto;flex:none;min-width:92px;min-height:44px;margin:0;padding:8px 12px;font-size:13px}
+.chev{flex:none;font-size:24px;color:var(--mu);padding:0 4px}
+.dbl{display:flex;align-items:center;gap:10px;padding:10px 12px;margin-bottom:10px;border:1px solid var(--gd);border-radius:14px;background:rgba(240,210,122,.07)}
+.qg{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-bottom:12px}
+.qt{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;margin:0;padding:16px 8px;min-height:116px;text-align:center;cursor:pointer}.qt:active{transform:scale(.97)}.qt b{font-size:15px}
+.tki{display:flex;align-items:center;gap:10px;min-width:0}
+.ab3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0 0 12px}.ab3 .b{min-height:44px;font-size:13px;padding:8px 4px;background:#0a1a12;box-shadow:none;margin:0}
+nav a{gap:2px;font-size:11px}nav a .ic{width:28px;height:28px;opacity:.55;transition:opacity .15s,transform .15s}nav a.on .ic{opacity:1;transform:translateY(-1px) scale(1.06);filter:drop-shadow(0 0 6px rgba(45,255,160,.45))}
+nav a.dot::after{top:2px;left:calc(50% + 10px)}
+@media(max-width:350px){.qg{gap:8px}.qt{min-height:100px;padding:12px 6px}.dr .b{min-width:76px}.hb{font-size:30px}.dr{gap:8px}}
+</style></head><body><div id="app"><p class="m" style="padding:40px;text-align:center">Loading…</p></div><div id="ts"></div><div id="pp"></div><div id="sh"></div><nav id="nav"></nav>
+<script>
+const VER='{{VER}}',GEAR='<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',CLOSE='<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+const T=Telegram.WebApp,$=s=>document.getElementById(s);T.ready();T.expand();try{T.BackButton.onClick(function(){if(tab=='a')AS='';else tab='h';render()})}catch(e){}try{T.setHeaderColor('#070d0a');T.setBackgroundColor('#070d0a')}catch(e){}
+const ADM=['al','ar','dv','cr','ac','cf','rn','as','at','ae','ad','ap','aw','ao','aa','au','ab','ag','sp','sq','so','sx'];
+let S,off=0,tab='h',AD=0,pb=null,HI=null,BD=null,fsub='b',FM=null,FI=null;
+const CN='<svg viewBox="0 0 64 64" width="52" height="52"><defs><radialGradient id="cg" cx=".35" cy=".3"><stop offset="0" stop-color="#7dffc4"/><stop offset="1" stop-color="#0a8a52"/></radialGradient></defs><circle cx="32" cy="32" r="29" fill="url(#cg)" stroke="#f0d27a" stroke-width="3"/><circle cx="32" cy="32" r="23" fill="none" stroke="#03140a" stroke-opacity=".45" stroke-width="2"/><path d="M32 16v32M20 22l24 20M44 22L20 42" stroke="#03140a" stroke-width="2.5" stroke-linecap="round"/></svg>';
+let wsub='s';const OKM={sd:'Sent ✓',bv:'Badge activated ★',wd:'Withdrawal requested',pr:'Promo submitted',vo:'Order submitted for review',ms:'Mining started',fb:'Stock purchased ✓',fu:'USDT order submitted for review',ff:'Free stock claimed ✓',xs:'Stock sent ✓',wb:'Bonus claimed ✓',sp:'Entry posted ✓',sq:'Rules saved ✓',so:'Order processed ✓'};
+const bdg=(l,sm)=>l?'<span class="bd v'+l+(sm?' s':'')+'">'+(l>1?'<svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor"><path d="M12 2l9 8-9 12L3 10z"/></svg>VVIP':'<svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M3 18h18l1-11-5 4-5-7-5 7-5-4z"/></svg>VIP')+'</span>':'';
+const fm=n=>{n=+n;return n!==0&&Math.abs(n)<0.01?String(+n.toFixed(6)):n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})},fk=n=>(+n).toLocaleString('en-US'),cno=i=>String(i).padStart(16,'0').replace(/(.{4})/g,'$1 ').trim();
+const toast=m=>{const e=$('ts');e.textContent=m;e.className='on';clearTimeout(toast.t);toast.t=setTimeout(()=>{e.className=''},2600)};
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>'&#'+c.charCodeAt(0)+';'),f=n=>{n=+n;return n!==0&&Math.abs(n)<0.01?String(+n.toFixed(6)):n.toFixed(2)},host=u=>String(u).replace(/^https?:[/][/]/,'').split('/')[0];
+const api=async(a,d)=>{try{const r=await(await fetch('/api',{method:'POST',body:JSON.stringify(Object.assign({i:T.initData},d||{},{a:a}))})).json();if(r.e){if(/join.*channel/i.test(r.e)){CJ=1;popup()}else toast(r.e);return null}return r}catch(e){toast('Network error');return null}};
+const act=async(a,d)=>{const b0=S?S.u.b:0,r=await api(a,d);if(!r){[].forEach.call(document.querySelectorAll('.b.busy'),function(x){x.classList.remove('busy')});return}
+if(ADM.indexOf(a)>-1){AD=r;if(r.ex){exportSheet(r.ex);r.ex=null}if(a=='sp'||a=='so')FM=null;if(a=='as'||a=='sq'||a=='ar'||a=='ac'||a=='rn'){await act('me');return}}
+else{S=r;off=r.now-Date.now();if(a!='me')HI=null;if(a=='vo')BD=null;if(['fb','fu','ff','xs'].indexOf(a)>-1){FM=null;FI=null}}
+render();if(S&&S.u.b>b0+1e-9&&['mc','tc','rc','sc','wb','gc','wn','ci','avc'].indexOf(a)>-1){toast('+'+f(S.u.b-b0)+' SPC');try{T.HapticFeedback.notificationOccurred('success')}catch(e){}}else if(OKM[a])toast(OKM[a])};
+const L={wbn:'Welcome bonus SPC (new users)',rate:'Mining SPC / day',minc:'Min claim',refrw:'Referral reward',secs:'Task wait seconds (min 30)',dtr:'Default daily task reward',prw:'Promoted task reward',wd:'Withdraw (1 on, 0 off)',minw:'Min withdraw',ch:'Required channels (@a,@b)',dep:'USDT BEP20 deposit address',wl:'Withdraw address label',vp1:'VIP USDT',vp2:'VVIP USDT',vc:'VIP coin price',vc2:'VVIP coin price',vr:'VIP SPC/day',disc:'VIP promo discount %',mins:'Min send',srw:'Story reward',sm:'Story image URL (https)',spc:'Stock price (SPC coins)',spu:'Stock price (USDT)',stt:'Total stock limit',wbr:'Welcome bonus SPC per day',wbf:'Welcome bonus: referrals needed (0 = none)',ade:'Reward Video (1 on, 0 off)',adb:'Reward Video block ID (numbers, from Adsgram)',adr:'SPC per video',adn:'Videos per round',adg:'Break after a round (hours)',adm:'Rounds per day',tke:'Task ad (1 on, 0 off)',tkb:'Task ad block ID (task-123)',tkm:'Task ad views per day'};
+const ICN={"ck":"data:image/webp;base64,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","vd":"data:image/webp;base64,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","gf":"data:image/webp;base64,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","tk":"data:image/webp;base64,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","rk":"data:image/webp;base64,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","pr":"data:image/webp;base64,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","pl":"data:image/webp;base64,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","h":"data:image/webp;base64,UklGRrQKAABXRUJQVlA4WAoAAAAQAAAAPwAAPwAAQUxQSPYEAAABCQZtG0lS2n3vcvwJH4iI/geAa61O0KSzQmJb8Pw5J6HgWOuNOhbgJ0MgkLQ/+gIRkTQDCeH/eTViAtLPtu2JZNu29b6SApIzMltlVWdmZmYeTB6zNa7xM4bF6DGPYTFbo3ePmRmLKRIjQqHPqGoZkdEGuBExAfLi0aRyPCCYnyArdLhvtFEEXJ7ZVFBl7debUafVrIeeckhF8jQZ7vsQVw3T7PaiTj0Mg0AH7TZ6aQIYrfrdugcLWZwKOs3moNNt1sJ6t9YwRgVOa8DS2MwNRwsTHOz2lgb9ZqA46o5N6OtZTfyASb2uUVGlo364NJahf8T3Rr5SWeBnMJpYIOcD2n17JPG2sqWWT4dmYCbWGYvyqVHQ9HyuKDerHVkfBoH2A3ESTPfy0pSizEdv0PCWIyvHL6/tjFW3M54JPZuPytI+UVB1ei054WPnv9l34eCRN6PUKh2MMU4BlqI0ijaaTVO/+847AXR2z8bPJ17Wz0/4YP+B+ydQqhBFUDTJxyM/ujxxQpCInx4+uJdH590d/uOh/fc5xwJ5Lihqt8eBTj8aAwQAyc3GT5+dfuCepnbEz799nplPZQ6FZbI9uPfyHEIcnqvnv3rSl48HANf5yp+vUmYecSieT8bppXCicFTh9F/nnCMghGJPv3Wpo+dBcbqX37DIDebPDHEolZxz4nJnjlL3RxmUQVE5CsAz+o1ei6WpHPUGBAttNRutbpulUBHBVSdBsFjdbNfbg74ugc5h+XxfiAVng9DlrZpIIUHvri9dASEWnbZaQepr6EK84POfPhUgFj5utpN6vRFEqghOPhE5qmiDyLLuhSrL59BKHvjLTKgqoaIpM+3XlFOHkAjUief/899EJRUuwpNNeHRhv20PeJ4Wz554PCoCWT47fmfsg36QH1BKM2y99RQcKkqpnR6/k7pGJ68FAoAzc063h0rL6rqwSdaNhvHidrzyBahKwa5f1CA6NTjt+bP9z58Nh4pPTkPm1xSnUWZ3PnETHCpvopCQ0W7LH5/5RThTPTSOk7o3idup+xhyD8diuONsHIe65YvCscjkub3Z2+uZH2bCY+OlR7ONtzazun/yBeAxQEwG05mZJp0IJxHVF46lt+1ybwp/NGmIVA6yupIPVebNHNq7W1TVWw9lhsBhrHzlbb4SlySAlOOSnbw7SwwVLMW02juPveDKEKLsjdfzpV0nmkBmFaxpyJOrkGJI4ul2OW++lu5lJAGItXk2VXz9bRR3b97/yuRnO5Bi7pXVt3e1djiURtPEa7fcAM4nfPwHD6rwsScEhQXTzVQ78DBILsjSe28MwHkE7nc/T6F+8/t9SgFRw7esrxwxZ57Z9OqbBgDnAOxzqcll7Z8vYS4hsP2argvmF5vIOReeXNMU8CicvU0R8pWXMKeQGL+xKT2PBYBEnXBiXwWhJgUEIBjHAgizFyGHCEhM3l3NPNY0ijtTbxGiPR+kgIQfAAAxBSBCEC5eW08MbQPlWueQp7NMtCYpyCwEAFIRkLCTnfVh6jEPULrMZkkynYzicZLBC8QdIMaUZH91d3+UgZSAKJ9w41F/ZWVwpBd1G/3hx9dM1FyfvO9rq9N4VxRBHQJgeQABqFq7F/XajWj0w/yUZe+Fd8/8xN443lPQAQEQi6YAYM0Pgmw1jDTi2D/eJkkCAKSgioSgVAIOFSYAAQEBCEAg+D8VVlA4IJgFAACwGACdASpAAEAAPnUukUYkoqGhM/gNUJAOiWwAt+s0QiSIqy/Y/wrwVhSu3adf4kfSw8xn6+fsV7vXoZ9AD+of8DrD/QA8tH9yvgu/bz9uvgG/Vv/15w12P/2jwx8WPsH2myE/DTLFYN6X2aZ47vqz2Bv1a34D9gHPR/YPq3oH8DP7CIjoW/lAWhU0lqwQAQujwCL1K5S6qoKr260gbLnTtaHsnzOw7jDyvlaP63ZW8iN1PtMaDhgNFNCm6ug8T8h6wfrsCAY8OYOwqxrkAAD+/x4u/vZoh9sI85Cur+UWu2NF7ufhJhrIARzy3J3k0ZQb2FX7pU3/bH3df4IiqjAcLHurQ5JrJH/7OO7E/Jy0N2k3xH0tZmJIdP/uxNFDsYqtaQ1yUdOILobrtL4u8kFbymbyMrSrTeg5V7bBH6faYhbavskQn7UTwJwXKm2/BvhwOH4gc53+1ptSDFRzU7o6IScKZwhy6r5WeqLhMp5PJssbVi7W6ItTBU0CKn6o+3fybzC7fcYl+P+szJ77n5a5hds+DjhhwAT1fy3byjKMtIoFSBGWBV39po1cuzSnlq05UwX6ar4GM+n6cEP/veLP8IPlAKcOzNs29/PR79X+t6TUb7iNuljGU9UQmuvWKg14YGCjdPXg0YZFfcPDV16b2Wf78p51FWSxhsEM3llRs109NnJXyDB/xmAso+4pvD7hzljYh8QScXgnBwo4eqRHxzZwbsemrXFP43+/0MQQZALcNRByT2SaluGZxGIid/P+11KRG1GSoPNqzOkr5qwxB1xhYxm+t+SMxjhb1BrQ5KV3LuHoCRntvUcYXvRAwelwXr/6qN51qcpIydtIMREN6qg5c59ly7lmdJbiPTxxjOyMXpxm128TI4eYDtap8kUqJWqFzt3+Zz9o8TNWa130YSSU61spTuyMGjBpT9Knu9TUDqhwcML02vodBdcwd1S5aCVjtYNCKo/tcNsf4usHeJjRf2K7KkR3sQ7sCyG3jPR/z3jMG8I8SCVH/8WU4wppX9J8Rd5NoF9vL2r9jJ75RFXd2fruea0LSqWlUnW4kiYykmnWSdh5XRrD8TjltYI+4eW1xqW5erPKWboiBc46lh3qvl3YHZ1JdmvkxTqe3bWmEWBwe8RLt+nDv9DmQU5+mh50WGutqJql3gsz6eQsm/2spbr462iFkVJM7+PuTgwqe+lF4z5i13NvPQSBZ4OYz/yCe/fuEIieEaNe2U2J20nPcMQS3XHh0EDZ9XGzBCNuAtcLz/M9EoxKJpIFvhPeC6f8xFSjUyey8bWXbLb6FDUDapHVg+pCCqDqeUemNKEvWLbKYlp1Ok66DnH7/hDRPR1SYo4+FbWkZQ/Hxv8xWFUriiEHNf/WsVmTQ0lQRATmk2rOX//Ufzmv2INjUlQe44icq5gCRBMlNZFdnOTTEFQXPczJei9nzt1CbBLntQniUxEdBxfK84N/rIcnVa9KfcLRAorjb5izdAo/+oDt/tkbUF1k9U88sS//bGoM5Mp9Mr0AyOGFEu6U/cvVdp5sXdmJhFtnqo/7U+nOEZWKK3+2XjbvPYz50Oe/Ij00JxwfEwlFgoJCzwbNCHSaEpKvNeIe5qQcYPWEHKjy/PQRbp7yOTiA6medrQ5vXsfCz7iqxdbZ8zziALQklr7wE+Djnsv998ky8GxWhGVNsERkXvZw03LhzRxBy/GiVYPH8A3YHU5Ewz9JVxX/2+eZo2EdjoQzdNMdo+vKyRpHHopkWan0bhKdTKtktRT6PvwIOe2zplbeuWde8eeSML8PZezUetIl7k46MmWAJeb9ky/tC1eLCcvExBYrEp4SG++urnG6Dfmjn6F1ALHr+wqOeFFfdDCR0BHdHa3RthiofK1Wj+ecj7sps0fmd/LKj4mRxh+CFgVcAAAA","m":"data:image/webp;base64,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","f":"data:image/webp;base64,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","r":"data:image/webp;base64,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","w":"data:image/webp;base64,UklGRvoJAABXRUJQVlA4WAoAAAAQAAAAPwAAPwAAQUxQSJQEAAABCQVtJCnZo6d5/4JJQ0T/J0AqUVXirAKQev9z7z0iwl1EFWeUBBuGQCBpf/QFIiJpBhLC//VixASkZ23b1lasbet9fxRZxjBzUso5cC/1k+vn0su93mvMvYc5Mcui//8KVnOT1bEYERMgM7xBpkcAgltJckLEoNaGihCJoe9xzcnodFUsZsUs9Q4qdH1fV+vcosdEdZJnhr3WVd0FBltIdM5osNkduvvp2RPrVIty2vZSd7rTqLu66YKoEHVTh/4+OityOovExgZ1mzam8YevgLaqTu0BWrG+C523vnXNpT//VDUnJzE/8oyVnTHxXb8UwSA5kk4SbY05/1CBHVUfctG6MZeQRJW13iHbNwOgGsU6b1Irh1PK2DFERhvbxLa2syiOLlZJlnxZD4AK8ijnMxMlNro8Rdf3Acmpc9L54BHyVpQq0vnl+EUYuJZHaOM9TcXW9/CxMZVuTdBKgPmiblRssref777/bdsEPkC5yRXG17WkjW3brAtg6GiCtXWrN2vK/pO8KEpUv/xFpVZuSHCrmXkb6vRcQ1mDrqG4Rs3nfVAnm2sMC4i/vqVeScPAzabMfDwrY0KsVW8UbR80ewAGwwKAkGDe0087PNrPS6mz0MpGgus6AaATi3HDOi0zK48w84VF32RlrHvcPepiP/OZu4l5mRVf6yd8wBSF1V+KWbGItxQr95RUBw0IJ1F/VebponAP2XIx1z0FADFJDUdlsyQ8UBSblwMcpuvWhRaGUzVkZ08/iWHhJMisOVWmrkQGsuK5vfCqj+5RwjHQtvH19NB69gNlomoIARiFW0UURAiO0Jt2H08hd0YGfGxAXPMmEqDCqMbmyx/WLqPT+goxYtrVJ1y8+/OMypUzBThFTNwslkieMsfEJqUVON9MjVpTxGwTo1NFKJGpDar+b2q2sEQPRPJfgPxT49tzaANiMNOJAqAdMH896sq5lh3aRE8g7o+AChHApT1HEr8+GlsGqIt0iRfeS8wPn0OMAgCXofmkxSeY2USZsBfRJXFnhRdfAPEgXdGU5plLK8royw8Qru8kRAcR3LxYq/S52mSZXPY14qwQ3gOXrYC4XUCsNTbpbts8+8bLr85wByL/Z0OMKT/74jciQP7qCy8+DRlPktnXkDEI//6vvnEt8MSzTz+Tg6PxHYAYV7z/s08A//STm5XC2GKe6jA2d/lP4gHk67LMR0Om42jVZ1woXOdFnlrISEph7PbvnVlxQCXeaAHHGb/9e6VTg2EaIkZM+vK3yoUEN8ZnNqt1TuEkhNj+o3HB41aZrVfzZakpnADDl19E2xncLrYs8yzPSOFdhMD2k61lJB7vi8T5NCEFHElA4vj5d50LDmP2MI4C6zQJAXiTACAR9l9+31hGjZGbIOjbVmgVAUAeIAggnH/6+tBrFT1AGYWI1eXSVqfduVrmmdbqAYmhPm+3x1oTTACKYGQink+H4373A53NUu8MIaGrL5emFSjSaoAiuCMFUNl8tVyWRZE6qyASKSSgvQZA3J0QANpZZ7RSEdTGJi41AEBMlIBgWPAwAZGpXPOKuJYrEfx/ElZQOCBABQAAkBcAnQEqQABAAD55NJNGpKMhoSwdXMiQDwlsALszaHi/vHmJ1V+3/g3hoy3WEvVPtyPMd+wH7Ae8B6JfNd6lD0APLE/cP4MP21/bj2h///nAH9A28/J2v9XYvnf+d42dLLMu8hP1f/3fcK3WD9TWvNbgzI74p3QbTqr3G1zjcy6QMdctX5CWHMbu4hiHzHMGnzlZ0g8INTOBaHfAZ4Eg1cqJHEi0XBKK+k+oIfHjYSl2I9emSSyA8C3C1JDezpkML+F/70AA/vEPoJXASCLtxVYaiiLowzQ6ECH/jtOcnzGjx8jHuFTi9t6zuxWO2s6dX2fs/8SSxp1vDnBVWQ7k+viBdwS/ebx+8nN0r/V29mrC3Xt48KyOPoAWVp8vsnN7ePqnOITUh5c0zXUGPsdfck94nnXgFDTb7d2AyijYSphKd6QzCeQZHo30IHv6XaC1PkKWzmd0iZ5IQGpxa+wcoMJJYiu+A7SSM3ZrqJQdiRC7ADwT30N4atFU3oQykwl84KJzVsFK+O4ZKIMzS7IuE67v+4pZnRqPcPoijFr9/4h5oD2q9wC5pLqxzpEPMH3kooE/jV5p5c7cQnYEXZvU+J6Ep/BaZwTUtfXDFOlK9EGuWN5okUf0MQ9ncyEfzFS24XPi69JnUSH4OODzp4pnEckH5sCkQZ2EOve0eNQoF0Npzyn/aue1I99tOcjjCXaSB7qEjp3kTyGDroHe/5F+x93ImeWws9wAJyFqCQO4S9keSQe/7v0p0kOUhTvLeqmOB/9v94tkDYTtd/l4FOA8eONzEN1Ik2C/jm1d0v8nHveZH6H4mQCffIj6xKbo0UE1edgnoUp3f//ZHChj4fgyQTjbfPBSX/w041lLCF/Q1oHDW79qXxfT+2k/55c9gQfret/WTUBWiXuzX0rb7N/GkZkO+fVN1CL4TkKlOunK4uauxCqjT2Vdw7cVCPKdG+DHmNdhqULv7ZFbs3RomhRuE3GnaM7RM8h1uWjG/x70dd94kXZxQ9Ax2eSpzj7AKY0krWgCyM/eH2yhTeOav1UFbxFUaivQttXp20SyANEbLBEXZY7cqcAXSxve4OV1e4w1lJPzTmlM3RgYX99kK2UaTTHsU+wxW8GN4M3jQro4CJcrR5lXuMZjtnYTKiNA1ffD86iFzia6/PsySMcPE5wVl2BDj/EPrw9n/7CMjGi9nvEMawDhyZPmQfSIfgVRg7y5qfV5D0smf6cGMeeI11lV5/JhBe/sJvCLbuc/OnWYd6IoLvySAJo8CD8+B/imjIBeQDAVGNxVuKGvS+o59X+hBVs/HtatTmqT4gjZACndbGHEY6XkUabhAr+S1Gts416i3rQrfHd2hKwqO7RO+fxW1PERX4Cl7az67mzipUi9ni872qKE1VfmFReAQh2r15JHKpuz637UyFxWUNNekRQqQaoesL6o67vQqyT8Vz4q78d3kh3pnfG1Vy4vSxAq0pusAG6ZjTvGl6iSguOpWgnZW5xKn6OQH5IjjCqcC9yEOc1q/YBwtgGy2O+EH13F3vhjaf96N+pz2CkvzpyE5S7yIL27wHk0PjYfTfDFfY8w05kuBth8+8OzkY3JtfUmGCnldGeWvfDx2ztHoR/03n7Tu5JFP2O/Rfw+BMKzx0gH3BM9ZQJDfJQG3WWvyYTsb+wMZ3idzoggsNrQjQhfp7fkOF0ULqqX7OVc/l8ReedVBX95N8JP8gxWrIueujJmt1gmJZN7Texaldux3pOfv5Sye+YTgR/fzVfxrH7UTyC+Q8hLo3xEaz7h+kajDJ4qAAAA","db":"data:image/webp;base64,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","tg":"data:image/webp;base64,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","tt":"data:image/webp;base64,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","yt":"data:image/webp;base64,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","fb":"data:image/webp;base64,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","ig":"data:image/webp;base64,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","x":"data:image/webp;base64,UklGRuwLAABXRUJQVlA4WAoAAAAQAAAAPwAAPwAAQUxQSMkGAAABCYVt27ZB2Ek65Yj+hyRIUgUcpSDww+mmcphj/73PxO5NN7agWxLAUNC2DePyh90dChExAeTu1XyeSttIcpZe/+WmRxvY04gJmAC7tjYpkiT9Zo4RSUWNy8zMzCKDuq+wb0Q6M+9KzMzUzFBZGejuZkJmZ+X0ghwRE4DwsUQMIujGx42InXHBBgUTSUq9QPQxIu9q4zhraLoiN3s2npXwOE2masQ5PJhO8kk+Fjz2YS+g6sBpSUZ8Peo2xPoEMG+iYTWVwYzJDslFHwhbs9GiuyFnaRPXsbVwaSUTdqYvMoC3ABsUSVjvCBsNLUTUChdjtNH9kHU45C0Aph1QiIGxzrGSUvURLcVRs0SG1Hw022qX5Lw1AED7FQurhL4MKoQu2Hi8N9LZubVPBDtnGQDvL3ISaztITiFZSUTpZD9i8FUssjsyxgYAkuK4MpXY2A4oRamkygnF0WVyrLozVYU1RHymnt3R/UXFNI7LoUtqakmoua+GaupSD+Y1hW5XsmpSAEfT7lp0hp1vKJh0PGLWzUg5TXuBxXx1V7FLHbOUAjzpo0/6663Errkr7TJPqkstPGn0pJBl6GeLFJ47Xx7rbPbv3yopQ8pZCS/8eAvMDxXrlkOof3NvYSY5AXxsq3giL3jvs6XKFPylv3+sEdKQBOrcS/eHQgSjawD8U/HnJdUT7rjNoSY9fMpFwAHAS7+VSOgFQKkmx9BsAdAmgrzu4NNVbfOkKwSSp718UCUA5f7hV8ctODNA8PyzW28UYaxndVh/nvvRfARsb9vmWc8XgADI3Yj3QJkBobSuGu5+7l37oyVA+2v2nFQg8Ft+24YhZ6XVZH8fSgDQhL0rnwAxENBffdCH+KeffMBi3T9FG3UAoXr31dvjw4yxn9VQAqBNdPkLP4OyDIA4hfqguv6ANpBxZjIHAIW9lJtuvP2qs/eLACCxET/4/rN0fJQC8Gj5YG8yvwVaQxFseeZqHkb/zBdbAgA2cz35zLmozjwCpJPQBSysP5qmGQgADG/h3HI4eu/NQgDAS1H65vJi743oI9ROeIw8r9z0oLDB6Z92M70tYrMI0aW/nIVRBN5kXRCzWN3fP5qemeuDcDoNL6idbqgqAfofHVhLyS+CpbU4RTcdWr93MDvw1ssMdArC0y9iIy0sJPw+wdp2305c1LWp866FyvnJdMEI+RzrKQDQBlUC6Nw/jtQXYit+4QjAYR6roVS6mM69hMrWETsm7UGYX5hLFI0YEGVRE4BqPqpwzzFAPNR1hWgncAQ6+c29IUPBikzF2H4gxmyw1WoMQIhsfZ0uW90NKYbf3IDxXe2gliCe87FOhmFfeoGL1kUpMVKbzW4AunKTvZFooBKIHZbJ53G6GAdxEGfBSCSNPFDaDbX3a6VCzFbYZF8SRDBWgBEQgSxbQ30PtJ4okW/qpCMXBnIB2SQGc9tTO5kM6JmpaKxQxBlWbzSgyz5z6NlNTIYAXHQsnEtiO8m2E+OG4khVVIqbwleq43SgwTubcwlCWQwZ6QfSeUwoow8ljUJCvVbekkeI5+4+GIC0stXIVAoIY247O79QS98X9cEV9iIT9XapzVq/eVskEXlSqLcQm9PQuFl0RrPP4ibWgQKNZtrdH5ErS9ezIRiwiFBxts2NdTxxFKxzYswAiAfReLFEugbjaKnAIMFkM45DyMVwziCCoWygXGES2wsLyB4vxw5WG4VJA6E0lpFVSmEtCkMmRiuWMd1DuD8pxKTos7Kwvz8aCx2GYdUVJRS1DBoK+NnYOY+dILORPqiujmtrgNQPTUd7RllFQRbVU3V3kIdJwK60Fqt7UzUEoG/6JkUjbJWGGPlghkc/Hrgjyk3JI25bsox19tZq1zcuVuGELjK2pB2c6e46R9ncWTnxFpuZi/Q9zgchN2VsWW7J6cz5B7crcnfvGRsMtsyaxlQNZF2E0ibFP3+zgp4G8/pkle72vjiLbcvYd83o9w+mJ8rYTOMNWuH08vT863GJmh22l6EfSiNPBanSBsVNmUPpFEqs/i+39zwMTqvdsn3ocXBkoSBA6eGlxYG22FZBwMPLenhCnrDD7v6DdNXMLhxWAJTyvcVBwLJAASgAAtKDa8eFnxwLdltObvwLmarDo1kguTZW3rTtzYEAEIDU3LtxRSylOWHn7fXzT3nKxfPnzp7ZW3bBLsLYsInnOUm3erhcFbIoEXgCCHB75y6eOzxT2Ie9/SNu0Vy+8JRulYrAQikCINkdlBSI04NZmFV+b1Z7zcvjh5MLDUBEkbCueGJJAZAPznprLUlOfa7FRwMABMXjSFDskgBVPMZ0KlX8XwoAVlA4IPwEAADQFwCdASpAAEAAPnksk0akoiGhLhktUJAPCUAYkocx17XO3Q8WDqMbwf6AHSJ/tx+0XwAfqx/9dOG6u6jn5hPsPxmc23hWAHcZ8TRHb6qn8j/z/8x5vvpj/r/334Av5X/TPS39lHokfsSmNq06b2z1r2B+/mvwmkXpvw8ues2rwjdi2fb3oPBSgimALrdQ9ogg6NUAsJs8NlkoLNRPxT5KBTSilJbBTNNaJG/Tn+iXTTgoo+0MyER9b5fFomoCpkG+9+Z/QtgAAP7ysibLounuhn1R/7DwfcTJQdI/BQDjfUYoRntuOYhXMnjxn6RizGsW9/I6bxPT8xoF/vIrHMW/ifG7u7H37RyhE40J3yWaH4ROopvmMbx7yx3qgAdxGe8nt6REaWExXQsbq3Ny6QEt01Xf7y4yfdlEDl1Y1AUNuGFAQAWPyKfSd1uYnL+rmB+QSx3qaieiZN43E10jKPlA+1TXY5/rQdGAZ2/Tj52GNtHcEunGTDlQNEPNXA09q3IlKw5U4bn9vzgpBrqhPCJjhYTYX29aTYLAfXk9Uh+/675zrqQM3TjlPPDWB8Vf4nKdIYSTLJ7BRi4OXTLb3LvDujVOEdY4RcKEEJG9PV/8IP0o/sYrGOgCT8q89qCV/DnXpMUpgfirV9iW5CLJ0ziV/Ntvo+AnvQbiuJjqH8c9u4fus+IFPDtv4G6vo3n+RFpCVNTzrvSR11dIM/rdGfUhoHQyAEwphRs6nEaQEtlCTJ31H5marT/hlNyQE66zWSu+rU+2XhiMHzcKfcDkpWYE5BeDNGy1iGFfbMjYrM1pgRL/KOGmod0kF1OwpEg9FjJTK43bDwBdQlVfRTRbG3naJOAqlHM7Pobom/G2vx5NTl3HuST/KQvKGyF87sytfH/u/dLqco0uX34COC6SJAZOr/A8ZWnbV2SoNsm1Pnf+LuAUrWOrhOb2ef/IjvMrxBR41uy3kKV/cdecE4s+LCv6yS77Y58CrLWr/jdXRqI1u7SPfG8wafeMIdrfiRmTT1EBfhmFE/0u8v7rluqjwnQ1iMnz0TrloTGVfPgAS73QFs2FFcAaDvk4ToHzDeH7/rLYnnF9+5hAjpkVK9ZA4+99c80MsHqvY6iSfiRaF+fzyuPuXT0siJMUZiJD7Od/Dw6Nw9cA7eMVixt92vs17RFWjrPhJm8kplcuEgM5KxCWTvTf/l31f2gugixYJkdXgOzIs6sfcIsYQHA4bQqVmt2b0G44/tYTb+z2bqq91XlyW/+ND3zxbaATElp8c+UwVBwp7cef6Yrd1jUxC1XOGX08/fqZ2BfnhNf64k1+ghCnNTQOOPVwtjS/rNb3z0Si3GqMenDVz/5E2Qq/mJMZAaZ4fAUp/yCXegSxRdZQ+QlmqcYICeG/5lU49y8a8/qtBG+k+udUCCdCTh85tttKYBRWqw+Pm0hHNsuxzzeeon83p+bPn8Lgapn2LM7qjOTaDNNheGr2OJgAN2YAKf46xNdUVILCXDX06Nk7cARysmxzke8emooiQmLtSlxtPNfw/3vTRMDlLi7aKIPEzc7VRK/cXdgqhZgHwF6Eis3WUkiGmLcS+AfIX30XbHpgr/1zVXPk6sPfwSW6lRAcSuQakIcG2K5OOwOCzmyU4tvEtjGxQvP/7XTFdfpezPYtY9jl1x8C9nGnw5yPbFMYf7xesjEQHclT5fnwr6jMAeAA","web":"data:image/webp;base64,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"};
+function ic(n,z){const u=ICN[n];return u?'<img class="ic" src="'+u+'" width="'+z+'" height="'+z+'" alt="">':''}
+function drow(k,t,sb,r,a,x){return '<div class="c dc"><div class="dr"'+(a?' '+a:'')+'>'+ic(k,44)+'<div class="tx"><b>'+t+'</b><span class="m">'+sb+'</span></div>'+r+'</div>'+(x||'')+'</div>'}
+function qt(a,k,t,sb){return '<div class="c qt" '+a+'>'+ic(k,48)+'<b>'+t+'</b><span class="m">'+sb+'</span></div>'}
+function mine(){const u=S.u,m=u.mst;
+return dblbar()+homebal(1)+'<div class="c mine"><span class="st'+(m?' on':'')+'">'+(m?'<i class="pl"></i>MINING LIVE':'● IDLE')+'</span>'+(S.lv?'<div class="m" style="margin-top:8px">'+bdg(S.lv)+' boost active</div>':'')+'<div class="ringw"><svg class="ring" viewBox="0 0 200 200"><defs><linearGradient id="gr" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2dffa0"/><stop offset="1" stop-color="#f0d27a"/></linearGradient></defs><circle class="rb" cx="100" cy="100" r="88"/><circle class="rf" id="rg" cx="100" cy="100" r="88"/></svg><div class="rin"><div class="coin3">'+CN+'</div><div class="big" id="mn">0.000000</div><span class="m" id="pc">SPC mined</span></div></div><div class="stat3"><div><span>Per day</span><b>'+S.er+'</b></div><div><span>Per hour</span><b>'+(S.er/24).toFixed(2)+'</b></div><div><span>Min claim</span><b>'+S.c.minc+'</b></div></div>'+(m?'<p class="m" style="margin:4px 0">Mining pauses after 24 hours, so claim before that.</p><button class="b" id="cb" data-a="mc" disabled>Claim SPC</button>':'<button class="b" data-a="ms">▶ Start mining</button>')+'</div>'}
+function home(){const nt=S.tk.length,td=S.tk.filter(function(x){return x.dc}).length,dl=chkc()+vidc()+wbcc();
+return (cmchk(),'')+dblbar()+(CM===false?joinnote():'')+homebal()+(dl?'<div class="sec">Daily</div>'+dl:'')+'<div class="sec">Explore</div><div class="qg">'+qt('data-a="tab" data-t="t"','tk','Tasks',nt?td+' of '+nt+' done':'None now')+qt('data-a="tab" data-t="b"','rk','Ranking','Top 100')+qt('data-a="po"','pr','Promote Spider','Create my poster')+qt('data-a="tab" data-t="pl"','pl','Promote a link','Get visits')+'</div>'+livec()+'<p class="m" style="text-align:center;margin-bottom:10px">Support @{{AU}}</p>'}
+function story(){if(!S.c.sm)return '';const u=S.u,n=Date.now()+off,wt=u.sl&&n-u.sl<6048e5,rem=u.ss?Math.ceil(S.c.secs-(n-u.ss)/1e3):0;
+return '<div class="c"><b>Telegram story</b><p class="m">Post a story and earn '+S.c.srw+' SPC, once every 7 days.</p>'+(wt?'<button class="b" disabled>Next in '+Math.ceil((6048e5-(n-u.sl))/864e5)+'d</button>':!u.ss?'<button class="b" data-a="sv">Post story</button>':rem>0?'<button class="b" disabled>⏳ '+rem+'s</button>':'<button class="b" data-a="sc">Claim '+S.c.srw+'</button>')+'</div>'}
+function tl(){const pn=function(u){const h=String(host(u)||'').toLowerCase();return /t[.]me|telegram/.test(h)?['tg','Telegram']:/tiktok/.test(h)?['tt','TikTok']:/youtu/.test(h)?['yt','YouTube']:/facebook|fb[.]com/.test(h)?['fb','Facebook']:/instagram/.test(h)?['ig','Instagram']:/(^|[.])x[.]com|twitter/.test(h)?['x','X']:['web',h.replace(/^www[.]/,'')||'Website']};
+const sb='padding:8px 12px;min-width:86px;font-size:13px';
+const R=function(k){const rem=k.s?Math.ceil(S.c.secs-(Date.now()+off-k.s)/1e3):0,p=pn(k.url),b=k.dc?'<button class="b" disabled style="'+sb+'">Done ✓</button>':!k.s?'<button class="b" data-a="v" data-t="'+k.id+'" data-url="'+esc(k.url)+'" style="'+sb+'">'+esc(k.bl||'Visit')+'</button>':rem>0?'<button class="b" disabled style="'+sb+'">⏳ '+rem+'s</button>':'<button class="b" data-a="tc" data-t="'+k.id+'" style="'+sb+'">Claim</button>';return '<div class="r" style="border-bottom:1px solid var(--ln)"><span class="tki">'+ic(p[0],30)+'<span><b>'+esc(p[1])+'</b><br><span class="m" style="color:var(--a)">+'+f(k.rw)+' 🕷'+(k.o?' · Promoted':'')+'</span></span></span>'+b+'</div>'};
+if(!S.tk.length)return '<div class="c m">No tasks right now. Come back soon.</div>';
+const L=S.tk.slice().sort(function(a,b){return (a.dc?1:0)-(b.dc?1:0)}),D=L.filter(function(k){return !k.o}),P=L.filter(function(k){return k.o}),dn=S.tk.filter(function(k){return k.dc}).length;
+return '<p class="m" style="margin:2px 0 8px">Done '+dn+' of '+S.tk.length+' tasks</p>'+(D.length?'<div class="c"><b>Daily</b>'+D.map(R).join('')+'</div>':'')+(P.length?'<div class="c"><b>Promoted</b>'+P.slice(0,TM?999:10).map(R).join('')+(!TM&&P.length>10?'<button class="b" data-a="tm" style="margin-top:8px">Show more ('+(P.length-10)+')</button>':'')+'</div>':'')}
+function promo(){const P=[[1,5000,1,500,'visits'],[2,10000,2,1000,'visits'],[3,20000,4,1000,'unique visits']];
+return '<div class="c" data-f><b>🚀 Promote a link</b><p class="m">TikTok, Telegram or any https site. Members earn '+S.c.prw+' 🕷 per visit.</p><input name="url" placeholder="https://..."><select name="p">'+P.map(p=>'<option value="'+p[0]+'">'+p[3]+' '+p[4]+' · '+p[1]+' coins / '+p[2]+' USDT</option>').join('')+'</select><select name="pay"><option value="c">Pay with coins'+(S.lv?' (-'+S.c.disc+'%)':'')+'</option>'+(S.lv>1?'<option value="f">Free monthly (1k visits)</option>':'')+'<option value="u">Pay with USDT (BEP20)</option></select>'+usdtbox(S.c.dep,'Fill the hash only when paying with USDT. An admin reviews it manually.')+'<button class="b" data-a="pr">Submit</button></div>'}
+let PPX={};
+let PO=null;
+function ptext(c,t,x,y,fs,col,al,w,wt){wt=wt||'700';c.font=wt+' '+fs+'px Arial,Helvetica,sans-serif';c.fillStyle=col;c.textAlign=al||'left';const s=String(t);if(w){while(c.measureText(s).width>w&&fs>14){fs-=2;c.font=wt+' '+fs+'px Arial,Helvetica,sans-serif'}}c.fillText(s,x,y)}
+function prect(c,x,y,w,h,r){c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+h,r);c.arcTo(x+w,y+h,x,y+h,r);c.arcTo(x,y+h,x,y,r);c.arcTo(x,y,x+w,y,r);c.closePath()}
+function pweb(c,ox,oy,a0,W){c.strokeStyle='rgba(45,255,160,.2)';c.lineWidth=2;for(let i=0;i<=8;i++){const a=a0+i*Math.PI/16;c.beginPath();c.moveTo(ox,oy);c.lineTo(ox+Math.cos(a)*W*1.3,oy+Math.sin(a)*W*1.3);c.stroke()}
+for(let r=1;r<=8;r++){c.beginPath();for(let i=0;i<=8;i++){const a=a0+i*Math.PI/16,rr=r*W*.12-(i%2?W*.012:0),x=ox+Math.cos(a)*rr,y=oy+Math.sin(a)*rr;if(i==0)c.moveTo(x,y);else c.lineTo(x,y)}c.stroke()}}
+function poster(kind){
+const W=1080,tall=kind=='st',H=tall?1920:1080,m=tall?1.75:1,Y=function(v){return Math.round(v*m)},cv=document.createElement('canvas');cv.width=W;cv.height=H;
+const c=cv.getContext('2d'),u=S.u,lv=S.lv|0,nm=u.n||'Member';
+let g=c.createLinearGradient(0,0,W,H);g.addColorStop(0,'#04140c');g.addColorStop(.55,'#030a06');g.addColorStop(1,'#0a1f14');c.fillStyle=g;c.fillRect(0,0,W,H);
+let rg=c.createRadialGradient(W*.85,H*.08,10,W*.85,H*.08,W*.8);rg.addColorStop(0,'rgba(45,255,160,.3)');rg.addColorStop(1,'rgba(45,255,160,0)');c.fillStyle=rg;c.fillRect(0,0,W,H);
+pweb(c,W,0,Math.PI/2,W);pweb(c,0,H,-Math.PI/2,W);
+ptext(c,'SPIDER COMMUNITY',W/2,Y(120),60,'#f0d27a','center',W-120,'800');
+ptext(c,'PROUD MEMBER',W/2,Y(120)+54,30,'#2dffa0','center');
+let cy=Y(215);
+prect(c,60,cy,960,250,28);c.fillStyle='rgba(255,255,255,.06)';c.fill();c.lineWidth=3;let gb=c.createLinearGradient(60,cy,1020,cy+250);gb.addColorStop(0,'#f6dc8d');gb.addColorStop(1,'#c79a3b');c.strokeStyle=gb;c.stroke();
+let ag=c.createLinearGradient(100,cy+50,240,cy+190);ag.addColorStop(0,'#3ddc97');ag.addColorStop(1,'#0b5c3a');c.beginPath();c.arc(170,cy+125,70,0,Math.PI*2);c.fillStyle=ag;c.fill();c.lineWidth=4;c.strokeStyle='#f0d27a';c.stroke();
+ptext(c,Array.from(nm)[0].toUpperCase(),170,cy+152,76,'#04140c','center');
+ptext(c,nm,270,cy+100,58,'#eafff3','left',480);
+if(u.un)ptext(c,'@'+u.un,270,cy+150,34,'#9fd6b8','left',480,'600');
+if(u.mn)ptext(c,'SPIDER Member #'+u.mn+(u.mn<=1000?'  |  Early Member':''),270,cy+205,30,'#f0d27a','left',700,'700');
+const bt=lv==2?'VVIP':lv==1?'VIP':'MEMBER';let bg=c.createLinearGradient(780,cy+22,1000,cy+78);if(lv==2){bg.addColorStop(0,'#f6dc8d');bg.addColorStop(1,'#c79a3b')}else if(lv==1){bg.addColorStop(0,'#7df0bd');bg.addColorStop(1,'#2dffa0')}else{bg.addColorStop(0,'#5d7a69');bg.addColorStop(1,'#3a4f43')}
+prect(c,790,cy+24,210,54,27);c.fillStyle=bg;c.fill();ptext(c,bt,895,cy+62,30,lv==0?'#eafff3':'#2a1d02','center');
+let by=Y(505);
+ptext(c,'SPC BALANCE',W/2,by,28,'#7aa88f','center');
+ptext(c,fm(u.b),W/2,by+100,100,'#2dffa0','center',940,'800');
+const us=uxs(u.b);if(us)ptext(c,us,W/2,by+160,44,'#f0d27a','center',940,'700');
+let sy=Y(690),bx=[['STOCK FARM',String(S.sk&&S.sk.n||0)+' stocks'],['REFERRALS',String(S.rf|0)],['MINING BOOST','+'+(S.bst|0)+'%']];
+bx.forEach(function(b,i){const x=60+i*330;prect(c,x,sy,300,130,22);c.fillStyle='rgba(255,255,255,.05)';c.fill();c.lineWidth=2;c.strokeStyle='rgba(240,210,122,.45)';c.stroke();ptext(c,b[0],x+150,sy+42,22,'#7aa88f','center',270,'700');ptext(c,b[1],x+150,sy+98,46,'#eafff3','center',270,'800')});
+let vy=Y(840);c.save();c.shadowColor='rgba(240,210,122,.65)';c.shadowBlur=40;let vg=c.createLinearGradient(60,vy,1020,vy+140);vg.addColorStop(0,'#f6dc8d');vg.addColorStop(.5,'#f0d27a');vg.addColorStop(1,'#c79a3b');prect(c,60,vy,960,140,30);c.fillStyle=vg;c.fill();c.restore();
+ptext(c,'VISION 2037 STOCK FARM',W/2,vy+70,62,'#2a1d02','center',900,'800');
+ptext(c,'Grow your stock farm with SPIDER COMMUNITY',W/2,vy+114,26,'#2a1d02','center',900,'600');
+let fy=Y(1010);
+ptext(c,'Join me: t.me/'+S.bot+'?startapp=r'+u.id,W/2,fy,30,'#eafff3','center',960,'700');
+ptext(c,'SPIDER COMMUNITY  \u2022  VISION 2037',W/2,fy+40,22,'#7aa88f','center',960,'600');
+return cv}
+function plink(){return 'https://t.me/'+S.bot+'?startapp=r'+S.u.id}
+function mkposter(){try{PO.src=poster(PO.kind).toDataURL('image/jpeg',.85);PO.tok=null;PO.url=null}catch(e){toast('Could not make the poster');PO=null}popup()}
+async function pupl(){if(PO.tok)return true;const r=await api('pu',{d:PO.src,k:PO.kind});if(!r)return false;PO.tok=r.id;PO.url=r.url;return true}
+async function pact(a){if(!PO||PO.busy)return;PO.busy=1;popup();try{
+if(!(await pupl()))return;
+if(a=='pse'){const r=await api('ps',{id:PO.tok});if(r)toast('Poster sent to your Telegram chat')}
+else if(a=='pst'){let ok=false;try{if(T.shareToStory){T.shareToStory(PO.url,{text:'Proud member of SPIDER COMMUNITY! Join me:',widget_link:{url:plink(),name:'Join SPIDER'}});ok=true}}catch(e){}
+if(!ok){const r=await api('ps',{id:PO.tok});if(r)toast('Story sharing is not supported here. The poster was sent to your chat.')}}
+else{let ok=false;try{if(T.downloadFile&&T.isVersionAtLeast&&T.isVersionAtLeast('8.0')){T.downloadFile({url:PO.url,file_name:'spider-poster.jpg'});ok=true}}catch(e){}
+if(!ok){const r=await api('ps',{id:PO.tok});if(r)toast('Download is not supported here. The poster was sent to your chat.')}}
+}finally{if(PO){PO.busy=0;popup()}}}
+function posterbox(){const d=PO.busy?' disabled':'';return '<div class="pbox" style="max-width:420px;max-height:92vh;overflow:auto"><b style="color:var(--gd)">Your SPIDER poster</b><div style="margin:10px 0"><img alt="Poster" src="'+PO.src+'" style="width:100%;max-height:46vh;object-fit:contain;border-radius:12px;border:1px solid var(--gd)"></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><button class="b'+(PO.kind=='sq'?' gd':'')+'" data-a="pk" data-k="sq">Square</button><button class="b'+(PO.kind=='st'?' gd':'')+'" data-a="pk" data-k="st">Story</button></div><div style="display:grid;gap:8px;margin-top:10px"><button class="b" data-a="pd"'+d+'>Download</button><button class="b" data-a="pst"'+d+'>Share to Story</button><button class="b" data-a="psc">Share to Chat</button><button class="b" data-a="pse"'+d+'>Send to my chat</button></div><p class="m" style="margin-top:10px">Sharing does not give a reward. Rewards come from real members who join and become active.</p><div style="margin-top:8px"><button class="b bk" data-a="pc">Close</button></div></div>'}
+function posterbtn(){return '<div class="c"><b>Promote Spider Community</b><p class="m">Make your personal poster with your name, badge, balance and referral link. Share it on Telegram, Instagram or Facebook.</p><button class="b" data-a="po">Create my poster</button></div>'}
+function popup(){const p=$('pp');if(!p||!S)return;let h='';if(PO){p.className='on';p.innerHTML=posterbox();return}
+const g=(S.gf||[]).find(function(x){return !PPX['g'+x.id]});
+if(g)h='<div class="pbox"><div class="gift">🎁</div><b style="font-size:20px;color:var(--gd)">Congratulations!</b><div style="margin:4px 0 8px">Your Reward</div><div class="m">'+esc(g.lb)+'</div><div style="font-size:30px;font-weight:800;color:var(--a);margin:8px 0 2px">+'+fk(g.amt)+' SPC</div><div class="m" style="margin-bottom:14px">'+uxs(g.amt)+'</div><button class="b" data-a="gc" data-id="'+g.id+'">Claim reward</button><div class="m" style="margin-top:12px"><a data-a="pl" data-k="g'+g.id+'">Later</a></div></div>';
+else if(S.wn>0&&!PPX.wn)h='<div class="pbox"><div class="gift">🕷️</div><b style="font-size:20px;color:var(--gd)">Welcome to SPIDER COMMUNITY!</b><div class="m" style="margin:6px 0">Your welcome bonus is ready</div><div style="font-size:30px;font-weight:800;color:var(--a);margin:8px 0 2px">+'+fk(S.wn)+' SPC</div><div class="m" style="margin-bottom:14px">'+uxs(S.wn)+'</div><button class="b" data-a="wn">Claim bonus</button><div class="m" style="margin-top:12px"><a data-a="pl" data-k="wn">Later</a></div></div>';
+if(!h&&!GH&&(GR||S.u.gd===0)){const G=GL,i=Math.min(GS,G.length-1),g=G[i],last=i==G.length-1;h='<div class="pbox"><div class="gift">'+g[0]+'</div><b style="font-size:19px;color:var(--gd)">'+g[1]+'</b><div class="m" style="margin:8px 0 14px">'+g[2]+'</div><div class="m" style="margin-bottom:10px">'+(i+1)+' / '+G.length+'</div>'+(g[3]?'<button class="b" data-a="gs" data-i="'+i+'" style="margin-bottom:8px;background:#0a1a12">Show me</button>':'')+(last?'<button class="b" data-a="'+(GR?'ge':'gd')+'">Start</button>':'<button class="b" data-a="gn">Next</button><div class="m" style="margin-top:12px"><a data-a="'+(GR?'ge':'gd')+'">Skip</a></div>')+'</div>'}
+if(CJ)h=JOINPOP();p.className=h?'on':'';p.innerHTML=h;let gc=$('gchip');if(!gc){gc=document.createElement('div');gc.id='gchip';gc.setAttribute('data-a','gr');gc.textContent='Continue guide ▸';document.body.appendChild(gc)}gc.style.display=(GH&&(GR||S.u.gd===0)&&!CJ)?'block':'none'}
+function dblbar(){const k=+S.c.dbl,n=Date.now()+off;if(k>1&&n>=+S.c.dbs&&n<=+S.c.dbe)return '<div class="dbl">'+ic('db',32)+'<div class="tx"><b>Double Reward x'+k+' is ON</b><span class="m">Task rewards and mining claims. Ends '+new Date(+S.c.dbe).toLocaleString()+'</span></div></div>';return ''}
+function checkin(){const k=S.ck;if(!k)return '';let t='';
+for(let i=1;i<=7;i++){const dn=i<=k.n,cur=!k.done&&i==k.nd;
+t+='<div style="border:1px solid '+(cur?'var(--gd)':'var(--ln)')+';border-radius:12px;padding:8px 4px;text-align:center;background:'+(dn?'rgba(45,255,160,.12)':'transparent')+'"><div class="m">Day '+i+'</div><b style="color:'+(dn?'var(--a)':'var(--gd)')+'">'+fk(k.rw[i-1])+'</b><div class="m">'+(dn?'✓':cur?'Today':'🔒')+'</div></div>'}
+return '<div class="c"><b>Daily Check-in</b><p class="m">Streak: '+k.n+' day'+(k.n==1?'':'s')+'</p><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(64px,1fr));gap:6px;margin:8px 0">'+t+'</div>'+(k.done?'<button class="b" disabled>Checked in today ✓</button>':'<button class="b" data-a="ci">Claim Day '+k.nd+' · +'+fk(k.rw[k.nd-1])+' SPC</button>')+''+rulebox('rt_c','Check-in rules')+'</div>'}
+function rewardsadm(){const c=AD.c,n=Date.now(),on=+c.dbl>1&&n>=+c.dbs&&n<=+c.dbe;
+let x='<div class="c" data-f><b>Double Reward event</b><p class="m">'+(on?'ON now: x'+esc(c.dbl)+' until '+new Date(+c.dbe).toLocaleString():'No event is running.')+' It applies to task rewards and mining claims made during the event.</p><input name="k" type="number" step="any" placeholder="Multiplier (for example 2)"><div class="m">Start</div><input name="s" type="datetime-local"><div class="m">End</div><input name="e" type="datetime-local"><div class="g"><button class="b" data-a="dv">Start event</button>'+(on?'<button class="b x" data-a="dv" data-stop="1">Stop now</button>':'')+'</div></div>';
+x+='<div class="c" data-f><b>Daily check-in rewards (SPC)</b>'+[1,2,3,4,5,6,7].map(function(i){return '<div class="r" style="padding:2px 0"><span class="m">Day '+i+'</span><input name="c'+i+'" type="number" step="any" value="'+esc(c['ci'+i])+'" style="max-width:120px"></div>'}).join('')+'<button class="b" data-a="cr">Save rewards</button></div>';
+x+='<div class="c"><b>Gifts</b><p class="m">Give coins from the Users section with a label. The user sees a gift popup and taps Claim.</p>'+(AD.gfx&&AD.gfx.length?AD.gfx.map(function(g){return '<div class="r" style="border-bottom:1px solid var(--ln)"><span>'+esc(g.n||g.u)+' · '+esc(g.lb)+'<br><span class="m">'+new Date(g.ts).toLocaleString()+'</span></span><span style="text-align:right"><b>+'+fk(g.amt)+'</b><br><span class="m">'+(g.st=='c'?'Claimed':'Unclaimed')+'</span></span></div>'}).join(''):'<p class="m">No gifts yet.</p>')+'</div>';
+return x}
+function tasks(){return '<button class="b" data-a="tab" data-t="h" style="margin-bottom:10px;background:#0a1a12">← Home</button>'+dblbar()+rulebox('rt_t','Task rules')+'<div id="tkslot"></div><div id="tlw">'+tl()+story()+'</div>'}
+let RFD=null,RFT=0;
+function web(){const L=(RFD&&RFD.l)||[],n=Math.min(L.length,24);
+let g='<svg viewBox="0 0 300 300" style="width:100%;max-width:340px;display:block;margin:6px auto">';
+[40,80,120].forEach(function(r){g+='<circle cx="150" cy="150" r="'+r+'" fill="none" stroke="var(--ln)" stroke-width="1"/>'});
+for(let i=0;i<n;i++){const an=Math.PI*2*i/Math.max(n,1)-Math.PI/2,x=150+110*Math.cos(an),y=150+110*Math.sin(an),ok=L[i].st=='s';
+g+='<line x1="150" y1="150" x2="'+x.toFixed(1)+'" y2="'+y.toFixed(1)+'" stroke="'+(ok?'var(--a)':'var(--ln)')+'" stroke-width="'+(ok?1.4:1)+'" opacity="'+(ok?.8:.6)+'"/>'}
+for(let i=0;i<n;i++){const an=Math.PI*2*i/Math.max(n,1)-Math.PI/2,x=150+110*Math.cos(an),y=150+110*Math.sin(an),ok=L[i].st=='s';
+g+='<circle cx="'+x.toFixed(1)+'" cy="'+y.toFixed(1)+'" r="'+(ok?8:6)+'" fill="'+(ok?'var(--a)':'none')+'" stroke="'+(ok?'var(--a)':'var(--mu)')+'" stroke-width="1.5" opacity="'+(ok?1:.55)+'"/>'}
+g+='<circle cx="150" cy="150" r="16" fill="var(--bg)" stroke="var(--gd)" stroke-width="2"/><text x="150" y="155" text-anchor="middle" font-size="14" fill="var(--gd)">You</text></svg>';
+return '<div class="c"><b>My Spider Web</b><p class="m">Bright = Successful. Dim = Pending.'+(L.length>24?' Showing 24 of '+L.length+'.':'')+'</p>'+g+'</div>'}
+function RRT(c){const x=String(c.rt_r||'').trim();return x?x.split(String.fromCharCode(10)).filter(Boolean).map(function(l){return '<p class="m">'+esc(l)+'</p>'}).join(''):'<p class="m">1. Share your link. 2. Your friend opens the app and joins the Official Channel. 3. Your friend starts mining or finishes one task. Then the referral is Successful and you get '+c.refrw+' SPC once. Until then it stays Pending. Self-referrals and fake accounts get nothing.</p>'}
+function refer(){const u=S.u,l='https://t.me/'+S.bot+'?startapp=r'+u.id,s=S.rfs||{n:0,p:0,s:0,e:0},c=S.c;
+if(Date.now()-RFT>3e4){RFT=Date.now();api('rl').then(function(r){if(r){RFD=r;render()}})}
+let x='<div class="c"><b>👥 Earn '+c.refrw+' 🕷 per successful referral</b><input readonly value="'+l+'"><div class="g"><button class="b" data-a="cp" data-l="'+l+'">Copy link</button><button class="b" data-a="sh" data-l="'+l+'">Share</button></div></div>';
+x+='<div class="c"><div class="stat3"><div><span>Total</span><b>'+s.n+'</b></div><div><span>Pending</span><b>'+s.p+'</b></div><div><span>Successful</span><b>'+s.s+'</b></div></div><div class="r"><span class="m">Referral earnings</span><b>'+f(s.e)+' SPC</b></div><div class="r"><span class="m">Ready to claim</span><b>'+f(u.p)+' SPC</b></div><button class="b" data-a="rc"'+(u.p>0?'':' disabled')+'>Claim '+f(u.p)+' SPC</button></div>';
+x+='<div class="c"><b>Referral rules</b>'+RRT(c)+'<p class="m">Boost: each Successful referral adds +5% to your mining speed (max +100%). Now: +'+(S.bst||0)+'%.</p></div>';
+if(u.r&&!u.c)x+='<div class="c"><b>Join to activate your referrer</b>'+String(c.ch).split(',').filter(Boolean).map(h=>'<p><a data-a="ol" data-l="https://t.me/'+esc(h.trim().replace('@',''))+'" style="color:var(--a)">'+esc(h.trim())+'</a></p>').join('')+'<button class="b" data-a="ck">Verify</button></div>';
+x+=web();
+const cs=(RFD&&RFD.cs)||[],ca=n=>{const r=cs.find(z=>z.lvl==n);return r?r.a:0};
+x+='<div class="c"><b>Team commission</b><p class="m">You earn lifetime commission in SPC when people in your team buy stock or VIP/VVIP (with USDT or SPC). It is paid after the purchase is confirmed. Level 1 = '+c.cp1+'%, Level 2 = '+c.cp2+'%, Level 3 = '+c.cp3+'%.</p><div class="stat3"><div><span>Level 1</span><b>'+f(ca(1))+'</b></div><div><span>Level 2</span><b>'+f(ca(2))+'</b></div><div><span>Level 3</span><b>'+f(ca(3))+'</b></div></div>';
+const ch=(RFD&&RFD.ch)||[];
+x+=(ch.length?ch.map(h=>'<div class="r" style="border-bottom:1px solid var(--ln)"><span>Level '+h.lvl+' · '+(h.kd=='vip'?'VIP/VVIP':'Stock')+'<br><span class="m">'+new Date(h.ts).toLocaleString()+'</span></span><b style="color:var(--a)">+'+f(h.amt)+'</b></div>').join(''):'<p class="m">No commission yet.</p>')+'</div>';
+const L=(RFD&&RFD.l)||[];
+x+='<div class="c"><b>My referrals</b>'+(L.length?L.map(h=>'<div class="r" style="border-bottom:1px solid var(--ln)"><span>'+esc(h.n)+(h.un?' <span class="m">@'+esc(h.un)+'</span>':'')+'</span><b style="color:'+(h.st=='s'?'var(--a)':'var(--gd)')+'">'+(h.st=='s'?'Successful':'Pending')+'</b></div>').join(''):'<p class="m">No referrals yet.</p>')+'</div>';
+return x}
+function card(){const u=S.u,v=S.lv;
+return '<div class="vcard'+(v?' v'+v:'')+'"><div class="sh"></div><div class="vr"><span class="vbrand">SPIDER COIN</span>'+(v?bdg(v):'<span class="vl">STANDARD</span>')+'</div><div class="vr"><svg viewBox="0 0 44 34" width="38" height="29"><rect width="44" height="34" rx="6" fill="#e5c76b"/><path d="M0 11h14M0 23h14M30 11h14M30 23h14M14 0v34M30 0v34" stroke="#9a7424" stroke-width="1.2" fill="none"/><rect x="14" y="9" width="16" height="16" rx="3" fill="none" stroke="#9a7424" stroke-width="1.2"/></svg><svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#d9fbe9" stroke-width="2" stroke-linecap="round" opacity=".8"><path d="M8 8a6 6 0 010 8M12 5a10 10 0 010 14M16 2a14 14 0 010 20"/></svg></div><div><div class="vl">AVAILABLE BALANCE</div><div class="vamt">'+fm(u.b)+' <small style="font-size:13px;color:var(--gd)">SPC</small></div><div style="margin-top:2px;font-size:15px;font-weight:700;color:#f6dc8d;letter-spacing:.2px">'+uxs(u.b)+'</div></div><div class="vno">'+cno(u.id)+'</div><div class="vr"><div><div class="vl">CARD HOLDER</div><div class="vn">'+esc(u.n)+'</div></div><div><div class="vl">VISION 2037</div><div class="vn">'+(v?'LIFETIME':'MEMBER')+'</div></div><svg viewBox="0 0 48 30" width="48" height="30"><circle cx="17" cy="15" r="13" fill="#2dffa0" fill-opacity=".85"/><circle cx="31" cy="15" r="13" fill="#f0d27a" fill-opacity=".85"/></svg></div></div>'}
+function tier(n,price,usdt,perks,v){const own=v>=n;return '<div class="tier t'+n+'"><div class="r" style="padding:0"><b style="font-size:19px;color:'+(n>1?'#7df0bd':'#f0d27a')+'">'+(n>1?'VVIP':'VIP')+'</b>'+bdg(n)+'</div><ul>'+perks.map(p=>'<li>✓ '+p+'</li>').join('')+'</ul>'+(own?'<button class="b" disabled>Active ✓</button>':'<button class="b'+(n<2?' gd':'')+'" data-a="bv" data-k="v'+n+'">Buy · '+fk(price)+' coins</button>')+'<p class="m" style="margin-top:6px">or '+usdt+' USDT (form below)</p></div>'}
+function ux(n,rt){rt=String(rt||S.c.urt||'');const m=rt.match(new RegExp('^([0-9]+)(?:[.]([0-9]{1,10}))?$'));if(!m||typeof BigInt=='undefined')return '';const a=Math.abs(+n);if(!(a>0))return '0.00';const r10=BigInt(m[1]+((m[2]||'')+'0000000000').slice(0,10));const v=BigInt(Math.round(a*1e6))*r10/BigInt(1000000);if(v===BigInt(0))return '<0.0000000001';const s=v.toString().padStart(11,'0'),ip=s.slice(0,s.length-10);let fr=s.slice(s.length-10).replace(new RegExp('0+$'),'');while(fr.length<2)fr+='0';return (+n<0?'-':'')+Number(ip).toLocaleString('en-US')+'.'+fr}
+function uxs(n,rt){const x=ux(n,rt);return x?'\u2248 '+x+' USDT':''}
+function rateline(){return '<div class="m" style="text-align:center;margin:-4px 0 10px">1 SPC = <b>'+ux(1)+'</b> USDT</div>'}
+function ratecard(){const x=[1,100,1000,10000].map(n=>'<span>'+fk(n)+' SPC = <b>'+ux(n)+'</b> USDT</span>').join('');return '<div class="c"><b>SPC rate</b><div class="m" style="display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:6px">'+x+'</div></div>'}
+function livec(){const l=S.lc;if(!l)return '';return '<div class="c"><b>Community</b><div class="stat3"><div><span>Members</span><b>'+fk(l.m)+'</b></div><div><span>Joined today</span><b>'+fk(l.j)+'</b></div><div><span>SPC claimed</span><b>'+fk(Math.round(l.c))+'</b></div></div></div>'}
+let ST=null,UL=null,UD=null;
+function mtype(v,x){return v>0&&x>Date.now()?(v==2?'VVIP':'VIP'):'Normal'}
+function memb(){
+const row=(a,b)=>'<div><span>'+a+'</span><b>'+b+'</b></div>';
+let h='<div class="c"><b>Stats and Members</b><p class="m">Active means the user opened the app in the last 7 days. Activity counting starts when this version is deployed.</p>';
+if(ST===null){h+='<button class="b" data-a="sa">Load stats</button>'}
+else{const s=ST;
+h+='<button class="b" data-a="sa">Refresh stats</button>'
++'<div class="stat3">'+row('Members',fk(s.n))+row('Unique visitors',fk(s.vis))+row('SPC held',fk(Math.round(s.held)))+'</div>'
++'<div class="stat3">'+row('Active 24h',fk(s.d1))+row('Active 7d',fk(s.d7))+row('Active 30d',fk(s.d30))+'</div>'
++'<div class="stat3">'+row('Active',fk(s.d7))+row('Inactive',fk(s.inact))+row('Stock holders',fk(s.holders))+'</div>'
++'<div class="stat3">'+row('Normal',fk(s.norm))+row('VIP',fk(s.vip))+row('VVIP',fk(s.vvip))+'</div>'
++'<div class="stat3">'+row('Referrals',fk(s.rn))+row('Pending',fk(s.rp))+row('Successful',fk(s.rs))+'</div>'
++'<div class="stat3">'+row('Referral rewards',fk(Math.round(s.rrw)))+row('Commissions paid',fk(Math.round(s.cpaid)))+row('Unpaid commissions',fk(s.cun))+'</div>'}
+h+='<div data-f style="margin-top:10px"><input name="q" placeholder="ID, @username or name"><select name="m"><option value="">All members</option><option value="n">Normal</option><option value="v">VIP</option><option value="w">VVIP</option></select><input name="bmin" inputmode="decimal" placeholder="Min balance (SPC)"><button class="b" data-a="ud">Search</button></div>';
+if(UD){const d=UD,u=d.u;
+h+='<div style="border-top:1px solid var(--ln);margin-top:8px;padding-top:8px"><button class="b" data-a="udx">Back to list</button>'
++'<p><b>'+esc(u.n)+'</b> \u00b7 '+mtype(u.vl,u.vx)+(u.mn?' \u00b7 #'+u.mn:'')+'</p>'
++'<div class="m">ID '+u.id+(u.un?' \u00b7 @'+esc(u.un):'')+'</div>'
++'<div class="m">Registered: '+new Date(u.ts).toLocaleString()+'</div><div class="m">Last active: '+(u.la?new Date(u.la).toLocaleString():'not tracked yet')+'</div>'
++'<div class="r"><span>Balance</span><b>'+fm(u.b)+' SPC</b></div><div class="m" style="text-align:right">'+uxs(u.b)+'</div>'
++'<div class="stat3">'+row('Referrals',d.rf.n)+row('Pending',d.rf.p)+row('Successful',d.rf.s)+'</div>'
++'<div class="r"><span>Referral earnings</span><b>'+fm(d.rf.rw)+' SPC</b></div><div class="r"><span>Commission earnings</span><b>'+fm(d.cm)+' SPC</b></div><div class="r"><span>Completed tasks</span><b>'+d.tk+'</b></div><div class="r"><span>Stock holdings</span><b>'+d.st+'</b></div>'
++'<b>Check-ins</b>'+(d.ci.length?d.ci.map(x=>'<div class="m">'+esc(x.y)+' \u00b7 Day '+x.d+' \u00b7 +'+fm(x.amt)+'</div>').join(''):'<div class="m">None</div>')
++'<b>Purchases</b>'+(d.pu.length?d.pu.map(x=>'<div class="m">'+new Date(x.ts).toLocaleDateString()+' \u00b7 '+x.q+' stock \u00b7 '+fm(x.tot)+' '+esc(x.cu)+' \u00b7 '+esc(x.pm)+' \u00b7 '+esc(x.st)+'</div>').join(''):'<div class="m">None</div>')
++'<b>Wallet history</b>'+(d.hs.length?d.hs.map(x=>'<div class="m">'+new Date(x.ts).toLocaleDateString()+' \u00b7 '+esc(x.k)+(x.n?' '+esc(x.n):'')+' \u00b7 '+(x.amt>0?'+':'')+f(x.amt)+'</div>').join(''):'<div class="m">None</div>')+'</div>'}
+else if(UL){h+=UL.length?UL.map(x=>'<div class="r" data-a="ud" data-id="'+x.id+'" style="cursor:pointer;border-bottom:1px solid var(--ln)"><span>'+esc(x.n)+(x.un?' \u00b7 @'+esc(x.un):'')+'<br><span class="m">'+mtype(x.vl,x.vx)+' \u00b7 ID '+x.id+'</span></span><b>'+fm(x.b)+'</b></div>').join(''):'<p class="m">No members found</p>'}
+return h+'</div>'}
+function homebal(sm){const u=S.u,x=uxs(u.b);return '<div class="hero'+(sm?' sm':'')+'"><span class="m">Your balance</span><div class="hb">'+fm(u.b)+'</div><div class="hs">SPC'+(x?' &nbsp;·&nbsp; '+x:'')+'</div></div>'+rateline()}
+function comm(){const x=AD.cmx||{pool:0,un:0,pn:0,pa:0,ua:0};
+return '<div class="c" data-f><b>Commission (paid in SPC from the pool)</b><p class="m">Percent of each stock or VIP/VVIP purchase made with USDT or SPC. Lifetime, 3 levels.</p><div class="g"><input name="cp1" inputmode="decimal" placeholder="Level 1 %" value="'+esc(AD.c.cp1)+'"><input name="cp2" inputmode="decimal" placeholder="Level 2 %" value="'+esc(AD.c.cp2)+'"><input name="cp3" inputmode="decimal" placeholder="Level 3 %" value="'+esc(AD.c.cp3)+'"></div><button class="b" data-a="ac">Save percentages</button></div>'
++'<div class="c" data-f><b>Commission pool</b><div class="stat3"><div><span>Pool</span><b>'+fk(Math.round(x.pool))+'</b></div><div><span>Paid</span><b>'+fk(Math.round(x.pa))+'</b></div><div><span>Unpaid</span><b>'+fk(Math.round(x.ua))+'</b></div></div><p class="m">Unpaid = the pool was empty or the supply cap was full ('+x.un+' records). Paid records: '+x.pn+'.</p><input name="amt" type="number" step="any" placeholder="Add SPC to the pool (use - to remove)"><button class="b" data-a="cf">Update pool</button></div>'}
+function ratesupply(){const s=AD.sup||{total:1e10,cap:5e9,held:0},p=s.cap?s.held/s.cap*100:0;
+return '<div class="c" data-f><b>SPC to USDT rate</b><p class="m">Price of 1 SPC in USDT, up to 10 decimals. Now: 1 SPC = '+esc(AD.c.urt)+' USDT</p><input name="urt" inputmode="decimal" value="'+esc(AD.c.urt)+'"><button class="b" data-a="ar">Save rate</button><div class="m" style="margin-top:6px">Old history keeps the rate it was made with.</div></div>'
++'<div class="c"><b>Supply</b><div class="stat3"><div><span>Total supply</span><b>'+fk(s.total)+'</b></div><div><span>Community cap</span><b>'+fk(s.cap)+'</b></div><div><span>Held now</span><b>'+fk(Math.round(s.held))+'</b></div></div><div class="m">Used '+p.toFixed(2)+'% \u00b7 Room left '+fk(Math.max(0,Math.round(s.cap-s.held)))+' SPC</div>'+(p>=90?'<div class="m" style="color:var(--rd)">Warning: over 90% of the community cap is used.</div>':p>=80?'<div class="m" style="color:var(--gd)">Notice: over 80% of the community cap is used.</div>':'')+'</div>'}
+let CM=null,CMT=0;
+function joinnote(){const hs=String(S.c.ch||'').split(',').map(h=>h.trim()).filter(Boolean);if(!hs.length)return '';
+if(Date.now()-CMT>6e4){CMT=Date.now();api('cm').then(function(r){if(r){CM=r.m;render()}})}
+if(CM===true)return '';
+return '<div class="c" style="border-color:var(--gd)"><b>Become a Verified Member</b><p class="m">Join the Official Channel to become a Verified Member. Verified members can send, receive and withdraw SPC.</p>'+hs.map(h=>'<button class="b" data-a="ol" data-l="https://t.me/'+esc(h.replace('@',''))+'">Join '+esc(h)+'</button>').join('')+'<p class="m">After joining, open this page again.</p></div>'}
+let GS=0,GH=0,GR=0,CJ=0,TM=0,RISK=0;
+const SB='padding:8px 12px;min-width:96px;font-size:13px';
+function hms(r){const t=Math.max(0,Math.ceil(r/1e3));return String(Math.floor(t/3600)).padStart(2,'0')+':'+String(Math.floor(t%3600/60)).padStart(2,'0')+':'+String(t%60).padStart(2,'0')}
+let CIS=0,VB=0,VC=null,VK='',TKE=null,TKB='';
+function chkc(){const k=S.ck;if(!k)return '';let d='';for(let i=1;i<=7;i++){const dn=i<=k.n,cur=!k.done&&i==k.nd;d+='<i style="width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:5px;background:'+(dn?'var(--a)':'transparent')+';border:1px solid '+(cur?'var(--gd)':dn?'var(--a)':'var(--ln)')+'"></i>'}
+return drow('ck','Daily check-in','Streak '+k.n+' &nbsp;'+d+'<br>'+(k.done?'Checked in today ✓':'Today: Day '+k.nd+' · +'+fk(k.rw[k.nd-1])+' SPC'),'<span class="chev">›</span>','data-a="cio" style="cursor:pointer"')}
+function shsync(){const e=$('sh');if(!e)return;if(CIS&&S&&S.ck){if(e.className=='on'&&$('shc')){$('shc').innerHTML=checkin();return}e.className='on';e.innerHTML='<div class="bd" data-a="cic"></div><div class="sb"><div class="r" style="padding:0 0 8px"><b style="font-size:18px">📅 Daily Check-in</b><a data-a="cic" style="font-size:22px;padding:4px 8px;cursor:pointer">✕</a></div><div id="shc">'+checkin()+'</div></div>'}else{e.className='';e.innerHTML=''}}
+function vidc(){const v=S.ad;if(!v||!v.on)return '';const n=Date.now()+off;let b,t;
+if(v.rd>=v.max){t='Today: '+v.max+' of '+v.max+' rounds done. Come back tomorrow.';b='<button class="b" disabled>Done ✓</button>'}
+else if(v.bk>n){t='Round '+v.rd+' of '+v.max+' done. Next round in <b id="vct" style="display:inline">'+hms(v.bk-n)+'</b>';b='<button class="b" disabled>⏳ Wait</button>'}
+else{t='Round '+(v.rd+1)+' of '+v.max+' · Video '+(v.n+1)+' of '+v.per;b='<button class="b gd" data-a="vw">+'+fk(v.rw)+' SPC</button>'}
+return drow('vd','Reward video',t,b,'',rulebox('rt_a','Reward video rules'))}
+async function vplay(){if(VB||!S||!S.ad||!S.ad.on)return;if(!window.Adsgram){toast('Videos are not available now');return}
+VB=1;try{if(!VC||VK!==S.c.adb){VC=window.Adsgram.init({blockId:String(S.c.adb)});VK=S.c.adb}
+const r=await api('avs');if(!r){VB=0;render();return}S=r;off=r.now-Date.now();HI=null;
+let res=null;try{res=await VC.show()}catch(er){res=er}
+if(res&&res.done===true)await act('avc');else toast('Watch the whole video to get your reward')}catch(e){toast('No video is available now. Try again later')}
+VB=0;[].forEach.call(document.querySelectorAll('.b.busy'),function(x){x.classList.remove('busy')});render()}
+function tkmount(){const sl=$('tkslot');if(!sl||!S)return;const c=S.c;if(+c.tke!==1||!/^task-[0-9]{1,12}$/.test(String(c.tkb||'')))return;
+if(!TKE||TKB!==c.tkb){const k='tkad_'+new Date(Date.now()+off).toISOString().slice(0,10);let n=0;try{n=+localStorage.getItem(k)||0}catch(e){}
+if(n>=(+c.tkm||0))return;try{localStorage.setItem(k,String(n+1))}catch(e){}
+TKE=document.createElement('div');TKE.className='c';TKE.innerHTML='<div class="m" style="font-size:11px;margin-bottom:6px">Sponsored</div>';
+const el=document.createElement('adsgram-task');el.setAttribute('data-block-id',c.tkb);el.setAttribute('data-debug','false');el.className='task';
+['onBannerNotFound','onError','onTooLongSession','bannerNotFound','error'].forEach(function(ev){el.addEventListener(ev,function(){if(TKE)TKE.style.display='none'})});
+TKE.appendChild(el);TKB=c.tkb}
+sl.appendChild(TKE)}
+setInterval(function(){const e=$('vct');if(!e||!S||!S.ad)return;const r=S.ad.bk-(Date.now()+off);if(r<=0){render();return}e.textContent=hms(r)},1000);
+function wbcc(){const w=S.wb;if(!w||!w.on||w.n>=7)return '';const dn=Math.min(7,w.n+(w.t?0:1));return drow('gf','Welcome bonus','Day '+dn+' of 7'+(w.need>0?' · needs '+w.need+' verified referrals':''),(w.t?'<button class="b" disabled>Claimed ✓</button>':'<button class="b gd" data-a="wb">+'+fk(w.rw)+' SPC</button>'),'')}
+function ftt(q){const c=S.c;return 'Total: <b>'+fm(q*+c.spc)+' SPC</b> or <b>'+(Math.round(q*+c.spu*100)/100)+' USDT</b>'}
+function usdtbox(a,n){return '<p class="m">Pay in USDT on the <b>BEP20 network only</b>. Send the exact amount to:</p>'+dep(a)+'<input name="tx" placeholder="USDT TX hash (0x...)"><p class="m">'+(n||'Paste your TX hash after paying. An admin reviews it manually.')+'</p>'}
+document.addEventListener('input',function(e){const t=e.target;if(t&&t.getAttribute&&t.getAttribute('data-tot')){const el=$('ftot');if(el)el.innerHTML=ftt(Math.max(0,Math.min(1000,parseInt(t.value)||0)))}});const GL=[['🕷️','Welcome to SPIDER COMMUNITY','Earn SPC coins with mining, tasks and daily check-in.'],['⚡','Mining','Open the Mining tab and tap Start. Come back later and claim your SPC. Mining pauses after 24 hours, so claim in time.','m','.ringw'],['✅','Tasks and Check-in','Check in on Home every day and finish tasks to earn more SPC.','t','.pg .b'],['👥','Invite friends','Share your link in Refer. You earn a reward and lifetime commission. Your friend must join the Official Channel for the referral to count.','r','.pg input'],['✔️','Become a Verified Member','Join the Official Channel to become a Verified Member. Without it you cannot send or withdraw SPC.','w','.pg .c[style*="var(--gd)"]'],['👛','Your Wallet','Send SPC to friends. Your USDT value is always shown.','w','.vcard']];
+function hl(q){setTimeout(function(){const e=document.querySelector(q);if(!e)return;e.classList.add('hl');e.scrollIntoView({block:'center',behavior:'smooth'});setTimeout(function(){e.classList.remove('hl')},5000)},300)}
+function cmchk(){if(S&&String(S.c.ch||'').trim()&&Date.now()-CMT>6e4){CMT=Date.now();api('cm').then(function(r){if(r){CM=r.m;render()}})}}
+function JOINPOP(){const hs=String(S.c.ch||'').split(',').map(function(h){return h.trim()}).filter(Boolean);return '<div class="pbox"><div class="gift">✔️</div><b style="font-size:19px;color:var(--gd)">Join the Official Channel</b><div class="m" style="margin:8px 0 14px">Become a Verified Member. You must join the Official Channel before you can do this.</div>'+hs.map(function(h){return '<button class="b" data-a="ol" data-l="https://t.me/'+esc(h.replace('@',''))+'" style="margin-bottom:8px">Join '+esc(h)+'</button>'}).join('')+'<button class="b" data-a="cv">I joined, verify me</button><div class="m" style="margin-top:12px"><a data-a="cx">Close</a></div></div>'}
+
+function dotf(t){if(!S)return false;if(t=='h')return !!((S.gf&&S.gf.length>0)||S.wn>0||(S.ck&&!S.ck.done));if(t=='t')return !!(S.ck&&!S.ck.done);if(t=='m'){const u=S.u;if(!u||!u.mst)return false;return Math.min(Date.now()+off-u.mst,864e5)*S.er/864e5>=+S.c.minc}return false}
+function rulebox(k,t){const x=String((S.c&&S.c[k])||'').trim();if(!x)return '';return '<details class="rl"><summary>'+esc(t)+' <span>Read rules</span></summary>'+x.split(String.fromCharCode(10)).filter(Boolean).map(function(l){return '<p class="m">'+esc(l)+'</p>'}).join('')+'</details>'}
+function aboutbtns(){return '<div class="ab3"><button class="b" data-a="tab" data-t="ab">About</button><button class="b" data-a="tab" data-t="hp">Help</button><button class="b" data-a="gh">Guide</button></div>'}
+function backbtn(){return '<button class="b bk" data-a="tab" data-t="h">&larr; Back to Home</button>'}
+function about(){const c=S.c;return backbtn()+'<div class="c aboutc"><b style="font-size:22px;color:var(--gd)">SPIDER COMMUNITY</b><div class="m" style="margin-top:2px">Vision 2037 Stock Farm</div><h4>Our Mission</h4><p>'+esc(c.ab_m)+'</p><h4>Our Vision</h4><p>'+esc(c.ab_v)+'</p></div><div class="c"><b>Important notice</b><p class="m">'+esc(c.ab_d)+'</p></div>'}
+function suplink(){const s=String((S.c&&S.c.sup)||'').trim();return s.charAt(0)=='@'?'https://t.me/'+s.slice(1):s}
+function help(){const q=String(S.c.faq||'').split(String.fromCharCode(10)).filter(Boolean).map(function(l){const i=l.indexOf('|');return [(i<0?l:l.slice(0,i)).trim(),i<0?'':l.slice(i+1).trim()]});
+return backbtn()+'<div class="c"><b>Help Center</b><p class="m">Tap a question to see the answer.</p>'+q.map(function(x){return '<details class="fq"><summary>'+esc(x[0])+'</summary><p class="m">'+esc(x[1])+'</p></details>'}).join('')+'</div>'+(suplink()?'<div class="c"><b>Need more help?</b><p class="m">Our support team can help you.</p><button class="b" data-a="ol" data-l="'+esc(suplink())+'">Contact Support</button></div>':'')}
+function rulesadm(){const c=AD.c,F=[['rt_t','Task rules'],['rt_r','Referral rules'],['rt_w','Send and receive rules'],['rt_c','Check-in rules'],['rt_a','Reward video rules'],['rt_s','Stock and VIP/VVIP rules'],['ab_m','About: Mission'],['ab_v','About: Vision'],['ab_d','About: Important notice'],['faq','Help Center questions (one per line: Question | Answer)']];
+return '<div class="c" data-f><b>Rules and content</b><p class="m">Users see these texts in the app. Keep them short and simple. Use a new line for a new rule.</p>'+F.map(function(f){return '<div class="m" style="margin-top:8px">'+f[1]+'</div><textarea name="'+f[0]+'" rows="'+(f[0]=='faq'?7:3)+'">'+esc(c[f[0]])+'</textarea>'}).join('')+'<div class="m" style="margin-top:8px">Support link (@username or https:// link)</div><input name="sup" value="'+esc(c.sup)+'" placeholder="@support_username"><button class="b" data-a="rn" style="margin-top:10px">Save</button></div>'}
+function wallet(){const u=S.u,v=S.lv,K={mc:'Mining',task:'Task',referral:'Referral',sent:'Sent',received:'Received',promo:'Promo',vip:'VIP',withdraw:'Withdraw',commission:'Commission',refund:'Refund',story:'Story',admin:'Admin',stock:'Stock',farm:'Farm profit',bonus:'Welcome bonus',gift:'Gift',checkin:'Daily check-in',ad:'Reward video'};
+let x=card()+'<div class="sg">'+[['s','Send'],['w','Withdraw'],['v','VIP'],['h','History']].map(t=>'<a data-a="ws" data-s="'+t[0]+'" class="'+(wsub==t[0]?'on':'')+'">'+t[1]+'</a>').join('')+'</div>';
+if(wsub=='s'){x+=joinnote()+rulebox('rt_w','Send and receive rules');
+x+='<div class="c"><b>Your ID</b><div class="r"><span style="font-family:ui-monospace,monospace;font-size:18px;color:var(--a)">'+u.id+(u.un?'<br><span class="m">@'+esc(u.un)+'</span>':'')+'</span><button class="b" data-a="cp" data-l="'+u.id+'">Copy ID</button></div><p class="m">Share your ID so others can send you SPC.</p></div>';
+x+='<div class="c" data-f><b>Send SPC</b><input name="to" placeholder="@username or Telegram ID" autocomplete="off"><input name="amt" type="number" step="any" placeholder="Amount (min '+S.c.mins+')"><button class="b" data-a="sd">Send</button><p class="m">The receiver must have opened the app once.</p></div>'}
+else if(wsub=='w'){x+=joinnote()+rulebox('rt_w','Send and receive rules');
+x+=S.c.wd=='1'?'<div class="c" data-f><b>Withdraw</b><p class="m">Requests are reviewed and paid manually by an admin.'+(v>1?' VVIP: priority review.':'')+'</p><input name="amt" type="number" step="any" placeholder="Min '+S.c.minw+'"><input name="ad" placeholder="'+esc(S.c.wl)+'"><button class="b" data-a="wd">Withdraw</button></div>':'<div class="c" style="text-align:center;padding:30px 14px"><div style="font-size:36px">🔒</div><b style="font-size:17px;color:var(--gd)">Withdrawal Start in 2027</b></div>'}
+else if(wsub=='v'){
+x+=tier(1,S.c.vc,S.c.vp1,['Mining '+S.c.vr+' SPC/day','-'+S.c.disc+'% on coin promos','Gold VIP badge','Permanent'],v)+tier(2,S.c.vc2,S.c.vp2,['Everything in VIP','1 free 1k-visit promo every month','Priority withdrawal review','Premium VVIP badge'],v);
+x+='<div class="c" data-f><b>Pay with USDT (BEP20)</b><select name="k"><option value="v1">VIP · '+S.c.vp1+' USDT</option><option value="v2">VVIP · '+S.c.vp2+' USDT</option></select>'+usdtbox(S.c.dep)+'<button class="b" data-a="vo">Submit USDT order</button></div>'}
+else{const hs=HI||[];x+='<div class="c"><b>Wallet history</b>'+(hs.length?hs.map(h=>'<div class="r" style="border-bottom:1px solid var(--ln)"><span>'+(K[h.k]||esc(h.k))+(h.n?' · '+esc(h.n):'')+'<br><span class="m">'+new Date(h.ts).toLocaleString()+'</span></span><span style="text-align:right"><b style="color:'+(h.amt<0?'var(--rd)':'var(--a)')+'">'+(h.amt>0?'+':'')+f(h.amt)+'</b>'+(h.rt?'<br><span class="m">'+uxs(h.amt,h.rt)+'</span>':'')+'</span></div>').join(''):'<p class="m">No activity yet</p>')+'</div>'}
+return x}
+function board(){const B=BD||{lb:[],rm:[]};
+return '<button class="b" data-a="tab" data-t="h" style="margin-bottom:10px;background:#0a1a12">← Home</button><div class="c"><b>🏆 Top 100</b><p class="m">Ranked by coins, then referrals, then VIP.</p>'+B.lb.map((r,i)=>'<div class="r" style="border-bottom:1px solid var(--ln)"><span><b>#'+(i+1)+'</b> '+esc(r.n)+bdg(r.lv,1)+'<br><span class="m">'+r.rc+' refs</span></span><b>'+f(r.b)+'</b></div>').join('')+'</div>'}
+const dep=a=>a?'<div class="dep"><code>'+esc(a)+'</code><button class="b gd" data-a="cp" data-l="'+esc(a)+'">Copy</button></div>':'<p class="m">Deposit address coming soon</p>';
+const cpf=t=>{const x=document.createElement('textarea');x.value=t;x.style.cssText='position:fixed;opacity:0;top:0';document.body.appendChild(x);x.select();try{document.execCommand('copy');toast('Copied ✓')}catch(e){toast('Copy failed')}x.remove()};
+function exportSheet(rows){const TB=String.fromCharCode(9),NL=String.fromCharCode(10),CR=String.fromCharCode(13),H=['Telegram ID','Name','Username','Badge','Stocks','Free VVIP stock','Paid SPC','Paid USDT'],B=['Standard','VIP','VVIP'],cl=v=>String(v==null?'':v).split(TB).join(' ').split(NL).join(' ').split(CR).join(' ');
+const R=rows.map(r=>[r.id,r.n,r.un?'@'+r.un:'',B[r.lv||0],r.stocks,r.fr?'Yes':'No',r.coins,r.usdt].map(cl));
+const tsv=[H].concat(R).map(r=>r.join(TB)).join(NL),csv=[H].concat(R).map(r=>r.map(v=>'"'+v.split('"').join('""')+'"').join(',')).join(NL);
+try{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='spc-farm-stock-holders.csv';document.body.appendChild(a);a.click();a.remove()}catch(e){}
+try{navigator.clipboard.writeText(tsv).then(()=>toast('Copied '+rows.length+' rows - paste into Google Sheets ✓'),()=>cpf(tsv))}catch(e){cpf(tsv)}}
+function wbc(){const w=S.wb;if(!w||!w.on||w.n>=7)return '';const dn=w.n+(w.t?0:1);
+return '<div class="c wb"><div class="r" style="padding:0"><b>🎁 Welcome bonus</b><span class="m">Day '+Math.min(7,dn)+' of 7</span></div><div class="wbd">'+[1,2,3,4,5,6,7].map(i=>'<i class="'+(i<=w.n?'on':'')+'">'+i+'</i>').join('')+'</div><p class="m">Claim '+fk(w.rw)+' SPC every day during your first 7 days.'+(w.need>0?' Needs '+w.need+' verified referrals.':'')+'</p>'+(w.t?'<button class="b" disabled>Claimed today ✓</button>':'<button class="b gd" data-a="wb">Claim '+fk(w.rw)+' SPC</button>')+'</div>'}
+function fhero(){const c=S.c,tt=+c.stt,ok=FM&&typeof FM=='object',sd=ok?FM.sold:null,left=ok?fk(Math.max(0,tt-sd)):'…',pc=ok?Math.min(100,sd/tt*100):0;
+return '<div class="fh"><div class="fhb">🌾 SPC FARM STOCK</div><div class="fht">Farming investment · limited to '+fk(tt)+' stocks</div><div class="fpr"><div><span>PRICE</span><b>'+fk(c.spc)+' SPC</b></div><div><span>OR</span><b>'+c.spu+' USDT</b></div></div><div class="fbar"><i style="width:'+pc+'%"></i></div><div class="fst"><div><b>'+(ok?fk(sd):'…')+'</b><span>Sold</span></div><div><b>'+left+'</b><span>Available</span></div><div><b>'+fk(tt)+'</b><span>Total</span></div></div><div class="fv">VISION 2037<br>MISSION: ONE ACTION EVERY YEAR · UPDATE EVERY 3 MONTHS</div></div>'}
+function fmy(){const k=S.sk||{n:0,fr:0},v=S.lv;
+return '<div class="cert"><div class="vl" style="letter-spacing:2px;color:#d9c07a">YOUR STOCK HOLDINGS</div><div class="big">'+fk(k.n)+' <small style="font-size:14px">STOCK</small></div><div class="m">'+esc(S.u.n)+' · ID '+S.u.id+' '+bdg(v,1)+'</div>'+(v>1?(k.fr?'<p class="m" style="margin-top:8px">Free VVIP stock claimed ✓</p>':'<button class="b gd" data-a="ff">🎁 Claim your free VVIP stock</button>'):'<p class="m" style="margin-top:8px">VVIP members receive 1 free stock.</p>')+'</div>'}
+function fmarket(){const m=FM&&typeof FM=='object'?FM:null;if(!m)return '<div class="c m">Loading market…</div>';
+const en=m.en.slice().reverse(),mx=Math.max.apply(null,en.map(e=>e.pps).concat([1]));let ch='';
+if(en.length){const w=300/Math.max(en.length,8),bw=w-4;ch='<svg viewBox="0 0 300 130" width="100%" style="display:block"><line x1="0" y1="65" x2="300" y2="65" stroke="#143826" stroke-width="1"/>'+en.map((e,i)=>{const h=Math.max(3,e.pps/mx*56),up=e.k=='p';return '<rect x="'+(i*w+2)+'" y="'+(up?65-h:65)+'" width="'+bw+'" height="'+h+'" rx="2" fill="'+(up?'#3ddc97':'#ff5470')+'"/>'}).join('')+'</svg>'}
+else ch='<p class="m" style="text-align:center;padding:18px 0">No market entries yet.</p>';
+return '<div class="c"><b>📊 Market dashboard</b><div class="mkst"><div><b>'+fk(m.holders)+'</b><span>Holders</span></div><div><b>'+fk(m.paid)+'</b><span>Paid (SPC)</span></div><div><b>'+m.en.length+'</b><span>Entries</span></div></div>'+ch+'<p class="m" style="text-align:center">▲ profit · ▼ loss (last '+en.length+' entries)</p>'+m.en.slice(0,10).map(e=>'<div class="r" style="border-top:1px solid var(--ln)"><span>'+(e.k=='p'?'<b class="pfu">▲ Profit</b>':'<b class="pfd">▼ Loss</b>')+' · '+fm(e.pps)+' per stock<br><span class="m">'+esc(e.nt||'')+' · '+new Date(e.ts).toLocaleDateString()+'</span></span>'+(e.k=='p'?'<span class="m">paid '+fk(e.tot)+'</span>':'')+'</div>').join('')+'</div>'}
+function fbuy(){const c=S.c;return '<div class="c" data-f><b>Buy SPC Farm Stock</b><p class="m">1 stock = '+fk(c.spc)+' SPC ('+uxs(c.spc)+') or '+c.spu+' USDT. Max 1000 per order.</p><input name="q" type="number" min="1" step="1" value="1" inputmode="numeric" data-tot="1"><p class="m" id="ftot">'+ftt(1)+'</p><button class="b gd" data-a="fb">Buy with SPC coins</button><div style="height:12px"></div><b>Pay with USDT (BEP20)</b>'+usdtbox(c.dep,'Stock is credited after admin approval and an invoice is generated.')+'<button class="b" data-a="fu">Submit USDT order</button></div>'}
+function fsend(){return '<div class="c" data-f><b>Send stock</b><p class="m">Transfer stocks to another member like coins. They must have opened the app once.</p><input name="to" placeholder="@username or Telegram ID" autocomplete="off"><input name="q" type="number" min="1" step="1" placeholder="Quantity" inputmode="numeric"><button class="b" data-a="xs">Send stock</button></div>'}
+function finv(){if(!FI||typeof FI!='object')return '<div class="c m">Loading…</div>';const K={buy:'Bought',free:'Free VVIP stock',sent:'Sent',recv:'Received'},st={a:'PAID',p:'PENDING',x:'REJECTED'};
+return '<div class="c"><b>🧾 Invoices</b><p class="m">Download a branded PDF invoice for every approved stock purchase.</p>'+(FI.iv.length?FI.iv.map(i=>'<div class="r" style="border-top:1px solid var(--ln)"><span><b>'+esc(i.no)+'</b><br><span class="m">'+i.q+' stock · '+fm(i.tot)+' '+esc(i.cu)+' · '+new Date(i.ts).toLocaleDateString()+'</span><br><span class="chp '+i.st+'">'+st[i.st]+'</span></span>'+(i.st=='a'?'<button class="b gd" data-a="inv" data-no="'+esc(i.no)+'">PDF</button>':'')+'</div>').join(''):'<p class="m">No invoices yet.</p>')+'</div><div class="c"><b>Stock activity</b>'+(FI.sl.length?FI.sl.map(x=>'<div class="r" style="border-top:1px solid var(--ln)"><span>'+(K[x.k]||esc(x.k))+(x.n?' · '+esc(x.n):'')+'<br><span class="m">'+new Date(x.ts).toLocaleString()+'</span></span><b class="'+(x.k=='sent'?'pfd':'pfu')+'">'+(x.k=='sent'?'-':'+')+fk(x.q)+'</b></div>').join(''):'<p class="m">No activity yet</p>')+'</div>'}
+function frules(){return '<div class="c"><b>📜 Stock rules</b><div class="rules" style="margin-top:8px">'+(S.c.str?esc(S.c.str):'Rules will be published by the admin.')+'</div></div>'}
+function farm(){const TT=[['b','Buy'],['m','Market'],['s','Send'],['i','Invoices'],['r','Rules']];
+return fhero()+fmy()+'<div class="sg">'+TT.map(t=>'<a data-a="fs" data-s="'+t[0]+'" class="'+(fsub==t[0]?'on':'')+'">'+t[1]+'</a>').join('')+'</div>'+({m:fmarket,b:fbuy,s:fsend,i:finv,r:frules})[fsub]()+(fsub=='r'?rulebox('rt_s','Stock and VIP rules'):'')+'<div class="disc"><b>Disclaimer:</b> SPC Farm Stock is a voluntary community investment. You take part entirely by your own free choice. Due to technical reasons or any project problem, no individual or the project team is liable for any profit or loss.</div>'}
+function ld(){if(tab=='w'&&wsub=='h'&&!HI){HI=[];api('hi').then(r=>{if(r){HI=r.h;render()}else HI=null})}else if(tab=='b'&&!BD){BD={lb:[],rm:[]};api('lb').then(r=>{if(r){BD=r;render()}else BD=null})}else if(tab=='f'){if(!FM){FM=1;api('fm').then(r=>{FM=r?r.mk:null;if(r)render()})}if(fsub=='i'&&!FI){FI=1;api('fi').then(r=>{FI=r||null;if(r)render()})}}}
+let LG=null;
+function errlog(){
+let h='<div class="c"><b>Error Logs</b><p class="m">App v'+VER+'. Shows the latest problems with time, user and line number. Line numbers come from the deployed file and can differ a little.</p>';
+if(LG===null){h+='<button class="b" data-a="lg">Load logs</button>'}
+else{
+h+='<div class="r"><button class="b" data-a="lg">Refresh</button><button class="b x" data-a="lc">Clear all</button><button class="b" data-a="lt">Test error</button></div>';
+if(!LG.length)h+='<p class="m">No errors recorded.</p>';
+LG.forEach(function(e){
+const sk=String(e.stk||''),mt=sk.match(new RegExp('([A-Za-z0-9_./-]+):([0-9]+):([0-9]+)'));
+let ln='';
+if(e.src=='client'){const c0=sk.split(String.fromCharCode(10))[0].match(new RegExp('^@([0-9]+):([0-9]+)'));if(c0&&+c0[1])ln='Page script line '+c0[1]+':'+c0[2]+' (about worker.js line '+(+c0[1]+558)+')'}
+else if(mt){const fn=sk.match(new RegExp('at (?:async )?([A-Za-z0-9_.<>]+)'));ln='Line '+mt[2]+':'+mt[3]+' ('+mt[1]+')'+(fn?' in '+fn[1]:'')}
+h+='<div style="border-top:1px solid var(--ln);padding:8px 0;word-break:break-word"><div><b>'+esc(e.src)+'</b> · '+esc(e.act||'-')+' · x'+e.n+'</div><div class="m">'+new Date(+e.ls).toLocaleString()+(e.u?' · user '+e.u:'')+'</div><div>'+esc(e.msg)+'</div>'+(ln?'<div class="m">'+esc(ln)+'</div>':'')+(sk?'<details><summary class="m">Details</summary><pre style="white-space:pre-wrap;font-size:11px;color:var(--mu)">'+esc(sk)+'</pre></details>':'')+'</div>'
+})}
+return h+'</div>'}
+let AS='';function admin(){if(!AD||!AD.c){if(!AD){AD=1;act('al')}return '<p class="m">Loading…</p>'}
+const has=r=>AD.im||AD.rl.indexOf(r)>-1,RL=[['cfg','Settings'],['tk','Tasks'],['us','Users'],['wd','Withdrawals'],['od','Orders'],['st','Stock'],['lg','Error Logs'],['sa','Stats & Members'],['rt','Rates & Supply'],['rw','Gifts & Rewards'],['cm','Commission'],['ru','Rules & Content']];
+const bt=(a,id,ok,t,x)=>'<button class="b'+(x?' x':'')+'" data-a="'+a+'" data-id="'+id+'" data-ok="'+ok+'">'+t+'</button>';
+const cks=sel=>RL.map(r=>'<label class="ck"><input type="checkbox" value="'+r[0]+'"'+(sel.indexOf(r[0])>-1?' checked':'')+'>'+r[1]+'</label>').join('');
+let x='<div class="c"><b>🛠 Admin</b> <span class="m">App v'+VER+' · Users: '+AD.n+' · '+(AD.im?'Main Admin':'Roles: '+AD.rl.join(', '))+'</span></div>';
+x='<div class="adm">'+x;if(!AS){const M=[['rq','Requests',(has('wd')?AD.w.length:0)+(has('od')?AD.od.length:0)+(has('st')?AD.so.length:0)+(has('tk')?AD.tk.filter(function(k){return k.o&&k.st=='p'}).length:0),has('wd')||has('od')||has('st')||has('tk')],['us','Users',0,has('us')||has('sa')],['tr','Tasks and Rewards',0,has('tk')||has('rw')],['st','Stock',0,has('st')],['cf','Settings and Rates',0,has('cfg')||has('rt')||has('cm')],['ct','Content and Rules',0,has('ru')||has('st')],['sy','System',0,AD.im||has('lg')]];return x+'<div class="g2">'+M.filter(function(m){return m[3]}).map(function(m){return '<button class="b" data-a="am" data-s="'+m[0]+'">'+m[1]+(m[2]?'<i class="ab">'+m[2]+'</i>':'')+'</button>'}).join('')+'</div></div>'}
+x+='<button class="b bk" data-a="am" data-s="">&larr; Admin menu</button>';
+if(has('cfg')&&AS=='cf')x+='<div class="c" data-f><b style="display:block;margin-bottom:6px">Settings</b>'+[['Mining and referral',['rate','minc','refrw','wbn','wbr','wbf']],['Tasks and story',['secs','dtr','prw','srw','sm']],['Wallet and withdraw',['wd','minw','mins','dep','wl','ch']],['VIP',['vp1','vp2','vc','vc2','vr','disc']],['Stock',['spc','spu','stt']],['Reward Video ads',['ade','adb','adr','adn','adg','adm']],['Task ad (above task list)',['tke','tkb','tkm']]].map(g=>'<b class="gh">'+g[0]+'</b>'+g[1].map(k=>'<span class="m">'+L[k]+'</span><input name="'+k+'" value="'+esc(AD.c[k])+'">').join('')).join('')+'<button class="b" data-a="as">Save</button></div>';
+if(has('tk')){if(AS=='tr')x+='<div class="c"><b>Daily tasks (max 10)</b>'+AD.tk.filter(k=>!k.o&&k.st=='a').map(k=>'<div data-f style="border-bottom:1px solid var(--ln);padding:6px 0"><input name="url" value="'+esc(k.url)+'"><input name="bl" maxlength="24" placeholder="Button label (e.g. Visit Channel)" value="'+esc(k.bl||'')+'"><input name="rw" type="number" step="any" value="'+k.rw+'"><div class="g"><button class="b" data-a="ae" data-id="'+k.id+'">Save</button>'+bt('ad',k.id,'','Delete',1)+'</div></div>').join('')+'<div data-f><input name="url" placeholder="https://..."><input name="bl" maxlength="24" placeholder="Button label (e.g. Visit Channel)"><input name="rw" type="number" step="any" placeholder="Reward (default '+esc(AD.c.dtr)+')"><button class="b" data-a="at">Add task</button></div></div>';
+if(AS=='rq')x+='<div class="c"><b>Promo orders</b>'+AD.tk.filter(k=>k.o).sort(function(a,b){return (b.st=='p'?1:0)-(a.st=='p'?1:0)}).map(k=>'<div class="r"><span>'+esc(k.url)+'<br><span class="m">owner '+k.o+' · left '+k.l+(k.st=='p'?' · '+esc(k.x):'')+'</span></span>'+(k.st=='p'?bt('ap',k.id,'1','✓')+bt('ap',k.id,'','✕',1):bt('ad',k.id,'','✕',1))+'</div>').join('')+'</div>'}
+if(has('od')&&AS=='rq')x+='<div class="c"><b>VIP orders</b>'+AD.od.map(o=>'<div class="r"><span>'+o.u+' · '+o.k+'<br><span class="m">'+esc(o.tx)+'</span></span>'+bt('ao',o.id,'1','✓')+bt('ao',o.id,'','✕',1)+'</div>').join('')+'</div>';
+if(has('wd')&&AS=='rq')x+='<div class="c"><b>Withdraw requests</b>'+AD.w.map(w=>'<div class="r"><span>'+w.u+(w.lv>1?' VVIP':w.lv?' VIP':'')+' · '+f(w.amt)+'<br><span class="m">'+esc(w.ad)+'</span></span>'+bt('aw',w.id,'1','✓')+bt('aw',w.id,'','✕',1)+'</div>').join('')+'</div>';
+if(has('us')&&AS=='us'){const U=AD.usr;x+='<div class="c"><b>Users</b><div data-f><input name="s" placeholder="Telegram ID or @username"><button class="b" data-a="au">Find</button></div>'+(U?'<p>'+esc(U.n)+' · '+U.id+(U.un?' · @'+esc(U.un):'')+'<br>Balance '+f(U.b)+(U.bn?' · BLOCKED':'')+(U.isa?' · ADMIN':'')+'</p><div data-f><input name="amt" type="number" step="any" placeholder="+ gift / - deduct SPC"><input name="lb" list="lbl" maxlength="30" placeholder="Gift label (Creator Reward, Top 10...)"><datalist id="lbl"><option value="Creator Reward"><option value="Activity Gift"><option value="Top 10"></datalist><div class="g"><button class="b" data-a="ag" data-id="'+U.id+'">Adjust</button><button class="b x" data-a="ab" data-id="'+U.id+'" data-on="'+(U.bn?'':'1')+'">'+(U.bn?'Unblock':'Block')+'</button></div></div>':'')+'</div>'}
+if(has('st')){if(AS=='st')x+='<div class="c" data-f><b>📈 Post market entry</b><p class="m">Profit pays coins to every holder instantly (stocks x amount). Loss is shown on the dashboard only.</p><select name="kd"><option value="p">Profit (pays coins)</option><option value="l">Loss (display only)</option></select><input name="pps" type="number" step="any" placeholder="Coins per stock"><input name="nt" placeholder="Note (visible to everyone)"><button class="b gd" data-a="sp">Post entry</button></div>';
+if(AS=='rq')x+='<div class="c"><b>Stock USDT orders</b>'+AD.so.map(o=>'<div class="r"><span>'+esc(o.nm||o.u)+' · ID '+o.u+'<br><span class="m">'+o.q+' stock · '+fm(o.tot)+' USDT<br>'+esc(o.tx)+'</span></span><button class="b" data-a="so" data-no="'+esc(o.no)+'" data-ok="1">✓</button><button class="b x" data-a="so" data-no="'+esc(o.no)+'" data-ok="">✕</button></div>').join('')+'</div>';
+if(AS=='ct')x+='<div class="c" data-f><b>Stock rules (visible to all)</b><textarea name="str" rows="7" placeholder="Write the stock rules here...">'+esc(AD.c.str)+'</textarea><button class="b" data-a="sq">Save rules</button></div>'}
+if(has('rw')&&AS=='tr')x+=rewardsadm();
+if(has('sa')&&AS=='us')x+=memb();
+if(has('ru')&&AS=='ct')x+=rulesadm();
+if(has('rt')&&AS=='cf')x+=ratesupply();
+if(has('cm')&&AS=='cf')x+=comm();
+if(has('lg')&&AS=='sy')x+=errlog();
+if(AD.im){if(AS=='st')x+='<div class="c"><b>Stock holders sheet</b><p class="m">Name, numeric ID, badge, stocks and amount paid. Downloads a CSV and copies a table you can paste into Google Sheets.</p><button class="b gd" data-a="sx">Export holders</button></div>';
+if(AS=='sy')x+='<div class="c"><b>Admins and roles</b><div class="r"><span>'+AD.main+' · Main Admin (all roles)</span></div>'+AD.ad.filter(z=>String(z.id)!=String(AD.main)).map(z=>'<div data-f style="border-top:1px solid var(--ln);padding:8px 0"><div class="r" style="padding:0"><b>'+z.id+'</b><button class="b x" data-a="aa" data-id="'+z.id+'" data-on="">Remove</button></div>'+cks(String(z.rl||'').split(','))+'<button class="b" data-a="aa" data-id="'+z.id+'" data-on="1">Save roles</button></div>').join('')+'<div data-f style="border-top:1px solid var(--ln);padding-top:8px"><input name="id" type="number" placeholder="Telegram numeric ID">'+cks(['cfg','tk','us','wd','od','st'])+'<button class="b" data-a="aa" data-on="1">Add admin</button></div></div>'}
+return x+'</div>'}
+let PT=null;function render(){const u=S.u,sy=window.scrollY,sm=PT===tab;PT=tab;
+$('app').innerHTML='<header><div class="av">'+esc(Array.from(u.n||'?')[0])+'</div><div class="tt"><b>'+esc(u.n)+bdg(S.lv,1)+(CM===true?' <span style="color:#4fe3a0">✔</span>':'')+'</b><span>ID '+u.id+(u.un?' · @'+esc(u.un):'')+'</span>'+(u.mn?'<span style="color:var(--gd)">SPIDER Member #'+u.mn+(u.mn<=1000?' · Early Member':'')+'</span>':'')+'</div>'+(S.adm?'<div class="gr" data-a="tab" data-t="'+(tab=='a'?'h':'a')+'">'+(tab=='a'?CLOSE:GEAR)+'</div>':'')+'</header><div class="pg">'+({h:function(){return home()+aboutbtns()},m:mine,t:tasks,pl:function(){return '<button class="b" data-a="tab" data-t="h" style="margin-bottom:10px;background:#0a1a12">← Home</button>'+promo()},f:farm,r:refer,b:board,w:wallet,a:admin,ab:about,hp:help})[tab]()+'</div>';
+const IC={f:'<path d="M12 21v-9M12 12c-4 0-6-2-6-6 4 0 6 2 6 6zM12 14c0-4 2-6 6-6 0 4-2 6-6 6z"/>',h:'<path d="M3 11l9-8 9 8M5 10v10h14V10"/>',m:'<path d="M13 2L4 14h7l-1 8 9-12h-7z"/>',t:'<circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/>',r:'<circle cx="10" cy="8" r="3.5"/><path d="M3.5 20v-1a4 4 0 014-4h5a4 4 0 014 4v1"/>',b:'<path d="M5 20V10M12 20V4M19 20v-7"/>',w:'<rect x="3" y="6" width="18" height="13" rx="3"/><path d="M16 13h2"/>',a:'<circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/>'};
+const tb=[['h','Home'],['m','Mining'],['f','Farm'],['r','Refer'],['w','Wallet']];
+$('nav').innerHTML=tb.map(t=>'<a data-a="tab" data-t="'+t[0]+'" class="'+((tab==t[0]||(t[0]=='h'&&(tab=='t'||tab=='b'||tab=='pl')))?'on':'')+(dotf(t[0])?' dot':'')+'">'+ic(t[0],28)+'<span>'+t[1]+'</span></a>').join('');
+const bl=$('bal');if(bl){if(pb!==null&&pb!=u.b){const a0=+pb,t0=performance.now(),to=+u.b,st=t=>{const k=Math.min(1,(t-t0)/600);bl.textContent=f(a0+(to-a0)*k);if(k<1)requestAnimationFrame(st)};requestAnimationFrame(st)}pb=u.b}ld();popup();shsync();tkmount();window.scrollTo(0,sm?sy:0);try{if(tab=='ab'||tab=='hp'||tab=='t'||tab=='b'||tab=='pl'||(tab=='a'&&AS))T.BackButton.show();else T.BackButton.hide()}catch(e){}}
+document.onclick=e=>{const b=e.target.closest('[data-a]');if(!b)return;if(b.tagName=='BUTTON'){if(b.classList.contains('busy'))return;b.classList.add('busy');setTimeout(function(){b.classList.remove('busy')},6000)}try{T.HapticFeedback.impactOccurred('light')}catch(e){}const d=Object.assign({},b.dataset),a=d.a,F=b.closest('[data-f]');
+if(F)F.querySelectorAll('input,select,textarea').forEach(i=>{if(i.name)d[i.name]=i.value});
+if(a=='dv'&&d.stop!='1'){d.s=new Date(d.s).getTime()||0;d.e=new Date(d.e).getTime()||0}
+if(a=='aa'&&F)d.rl=[].slice.call(F.querySelectorAll('input[type=checkbox]:checked')).map(i=>i.value).join(',');
+if(a=='tab'){tab=d.t;CIS=0;if(tab=='a')AS='';render();const p=$('app');p.classList.remove('fi');void p.offsetWidth;p.classList.add('fi')}
+else if(a=='v'){const l=d.url;if(l.indexOf('t.me/')>-1)T.openTelegramLink(l);else T.openLink(l);act('ts',{t:d.t})}
+else if(a=='sv'){try{T.shareToStory(S.c.sm,{text:'Mine Spider Coin with me!',widget_link:{url:'https://t.me/'+S.bot+'?startapp=r'+S.u.id,name:'Spider Coin'}})}catch(e){}act('ss')}
+else if(a=='sa'){api('sa').then(function(r){if(r){ST=r;render()}})}
+else if(a=='ud'){api('ud',d).then(function(r){if(!r)return;if(r.us){UL=r.us;UD=null}else if(r.d){UD=r.d}render()})}
+else if(a=='udx'){UD=null;render()}
+else if(a=='tm'){TM=1;render()}else if(a=='ge'){GR=0;GS=0;GH=0;render()}else if(a=='gr'){GH=0;popup()}else if(a=='gh'){GR=1;GS=0;GH=0;tab='h';render()}else if(a=='gs'){const g=GL[+d.i];GH=1;tab=g[3];AS='';render();hl(g[4])}else if(a=='cx'){CJ=0;popup()}else if(a=='cv'){CJ=0;CMT=0;api('cm').then(function(r){if(r){CM=r.m;if(r.m)toast('Verified ✔');else CJ=1}render()})}else if(a=='am'){AS=d.s||'';render()}else if(a=='gn'){GS++;popup()}
+else if(a=='lg'||a=='lc'||a=='lt'){(a=='lt'?api('lt').then(function(){return api('lg')}):api(a)).then(function(r){if(r&&r.lg){LG=r.lg;render()}})}
+else if(a=='po'){PO={kind:'sq'};mkposter()}
+else if(a=='pk'){if(PO){PO.kind=d.k;mkposter()}}
+else if(a=='pc'){PO=null;popup()}
+else if(a=='pd'||a=='pst'||a=='pse'){pact(a)}
+else if(a=='psc'){T.openTelegramLink('https://t.me/share/url?url='+encodeURIComponent(plink())+'&text='+encodeURIComponent('Join SPIDER COMMUNITY and earn SPC coins!'))}
+else if(a=='cio'){CIS=1;shsync()}else if(a=='cic'){CIS=0;shsync()}else if(a=='vw'){vplay()}
+else if(a=='pl'){PPX[d.k]=1;popup()}
+else if(a=='cp'){try{navigator.clipboard.writeText(d.l).then(()=>toast('Copied ✓'),()=>cpf(d.l))}catch(e){cpf(d.l)}}
+else if(a=='sh')T.openTelegramLink('https://t.me/share/url?url='+encodeURIComponent(d.l)+'&text='+encodeURIComponent('Mine Spider Coin with me!'));
+else if(a=='ol')T.openTelegramLink(d.l);else if(a=='ws'){wsub=d.s;render()}else if(a=='fs'){fsub=d.s;render()}else if(a=='inv'){const url=location.origin+'/invoice?i='+encodeURIComponent(T.initData)+'&n='+encodeURIComponent(d.no);try{if(T.downloadFile&&T.isVersionAtLeast&&T.isVersionAtLeast('8.0'))T.downloadFile({url:url,file_name:d.no+'.pdf'});else T.openLink(url)}catch(e){T.openLink(url)}}else if(a=='sp'){const go=()=>act('sp',d);if(T.showConfirm)T.showConfirm('Post this entry? A profit entry pays coins to all stock holders immediately and cannot be undone.',ok=>{if(ok)go()});else go()}else if((a=='fb'||a=='fu')&&!RISK&&T.showConfirm)T.showConfirm('SPC Farm Stock is a voluntary community investment. Profit is not guaranteed and you can lose value. Continue?',function(ok){if(ok){RISK=1;act(a,d)}});else if(['aw','ao','so','ap'].indexOf(a)>-1&&d.ok=='1'&&T.showConfirm)T.showConfirm('Approve this request? This cannot be undone.',function(ok){if(ok)act(a,d)});else act(a,d)};
+setInterval(function(){if(!S)return;const a=document.querySelector('nav a[data-t="m"]');if(a)a.classList.toggle('dot',dotf('m'))},3000);
+setInterval(()=>{const m=$('mn');if(m&&S){const u=S.u,v=u.mst?Math.min(Date.now()+off-u.mst,864e5)*S.er/864e5:0;m.textContent=v.toFixed(6);const b=$('cb');if(b)b.disabled=v<+S.c.minc;const p=Math.min(1,v/+S.c.minc),g=$('rg');if(g)g.style.strokeDashoffset=553*(1-p);const pc=$('pc');if(pc)pc.textContent=u.mst?Math.floor(p*100)+'% to claim':'SPC mined'}},100);
+setInterval(()=>{const ae=document.activeElement;if(ae&&/^(INPUT|SELECT|TEXTAREA)$/.test(ae.tagName))return;if(S&&tab=='t'&&(S.tk.some(k=>k.s&&!k.dc&&Date.now()+off-k.s<S.c.secs*1e3+1e3)||S.u.ss&&Date.now()+off-S.u.ss<S.c.secs*1e3+1e3)){const w=$('tlw');if(w)w.innerHTML=tl()+story();else render()}},1000);
+let CE=0;
+function rep(m,l,c,st){if(CE>=5||!T.initData)return;CE++;try{fetch('/api',{method:'POST',body:JSON.stringify({i:T.initData,a:'ce',m:String(m||'').slice(0,300),l:l|0,c:c|0,st:String(st||'').slice(0,700),t:tab})}).catch(function(){})}catch(e){}}
+window.addEventListener('error',function(e){if(e.filename&&e.filename.indexOf(location.origin)!==0)return;rep(e.message,e.lineno,e.colno,e.error&&e.error.stack)});
+window.addEventListener('unhandledrejection',function(e){const r=e.reason;rep(r&&r.message||String(r),0,0,r&&r.stack)});
+act('me');
+</script></body></html>`;
+
+// =====================================================================
+// DEPLOYMENT
+// 1. D1:        wrangler d1 create spc-db   (bind it as "DB" in wrangler.toml:
+//               [[d1_databases]] binding="DB" database_name="spc-db" database_id="<id>")
+//               Tables are created/migrated automatically on first request.
+// 2. Secrets:   wrangler secret put BOT_TOKEN        (token from @BotFather)
+//               wrangler secret put WEBHOOK_SECRET   (any random string, A-Z a-z 0-9 _ -)
+// 3. Admin:     Main admin is the constant MAIN_ADMIN at the top (8825348718).
+//               Optional override: wrangler.toml [vars] ADMIN_ID = "123456789".
+//               Extra admins are added in the Admin panel by numeric Telegram ID.
+// 4. Deploy:    wrangler deploy      (note your https://NAME.SUBDOMAIN.workers.dev URL)
+// 5. Webhook:   curl "https://api.telegram.org/bot<BOT_TOKEN>/setWebhook" \
+//                 -d "url=https://NAME.SUBDOMAIN.workers.dev/webhook" \
+//                 -d "secret_token=<WEBHOOK_SECRET>"
+// 6. BotFather: /mybots > SPC_Wallet_bot > Bot Settings > Menu Button
+//               URL: https://NAME.SUBDOMAIN.workers.dev/app
+// NOTE: USDT payments (VIP, Promo, Stock) and withdrawals are NOT verified on-chain.
+//       They are stored as pending and require manual admin approval.
+// =====================================================================
