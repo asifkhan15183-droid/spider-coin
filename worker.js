@@ -11,11 +11,12 @@
 // Version 1.6: bot notifications, live counters, admin stats and member details, member number, last active
 // Version 1.7: new button look, responsive layout, editable rules and notes, first-time guide, About and Help Center
 // Version 2.0.1: UI/UX fixes (inputs kept on refresh, confirm dialogs, own rank, popup close, lighter styles, accessibility, admin labels)
+// Version 2.3: Blue (USA SPC) theme with Dark/Blue switch on Home, saved per device
 // Version 2.2: glass cards, electric click sound + spark, coin burst, count-up, level-up celebration, sound toggle, skeleton loading, focus styles
 // Version 1.8: personal poster (square) and story image, Download / Share to Story / Share to Chat / Send to my chat
 // =====================================================================
 const MAIN_ADMIN = "8825348718", ADMIN_USER = "Spider_Incom", BOT_USER = "SPC_Wallet_bot";
-const FOREVER = 4102444800000, SV = "16", APP_VERSION = "2.2.0";
+const FOREVER = 4102444800000, SV = "16", APP_VERSION = "2.3.0";
 // Level system: 30 levels. LX = total XP needed for each level, LR = SPC reward for reaching each level,
 // BXT = Mystery Box every 5 levels: [min SPC, max SPC, tier name].
 const LX = [0, 50, 100, 150, 230, 380, 560, 790, 1060, 1370, 1730, 2130, 2580, 3080, 3630, 4220, 4860, 5560, 6300, 7100, 7950, 8850, 9800, 10810, 11870, 12990, 14160, 15380, 16660, 18000];
@@ -990,7 +991,7 @@ function buildInvoice(iv) {
 
 // ---------------------------------------------------------------- frontend
 const HTML = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<script src="https://telegram.org/js/telegram-web-app.js"></script><script async src="https://sad.adsgram.ai/js/sad.min.js"></script><title>Spider Coin</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script><script async src="https://sad.adsgram.ai/js/sad.min.js"></script><script>try{if(localStorage.getItem('th')=='b')document.documentElement.setAttribute('data-theme','blue')}catch(e){}</script><title>Spider Coin</title>
 <style>
 :root{--a:#2dffa0;--bg:#030a06;--ln:#143826;--mu:#7aa88f;--rd:#ff5470;--gd:#f0d27a;--card:#0a1a12;--card2:#06120b;--inp:#040c07;--ok:#3ddc97;--r1:12px;--r2:16px;--r3:22px}
 *{box-sizing:border-box;margin:0;-webkit-tap-highlight-color:transparent}
@@ -1170,6 +1171,45 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--a);box-s
 @keyframes zca{0%{opacity:1;transform:translate(0,0)}65%{opacity:1}100%{opacity:0;transform:translate(var(--x),var(--y))}}
 .zg{position:fixed;inset:0;pointer-events:none;z-index:150;background:radial-gradient(circle at 50% 45%,rgba(240,210,122,.35),rgba(45,255,160,.18) 40%,transparent 70%);animation:zga 1.4s ease-out forwards}
 @keyframes zga{0%{opacity:0}20%{opacity:1}100%{opacity:0}}
+
+/* v2.3 Blue theme (USA SPC look) - switch on Home */
+.tsw{display:flex;gap:8px;margin:0 0 12px}.tsb{flex:1;min-height:44px;border-radius:12px;border:1px solid var(--ln);background:var(--card2);color:var(--mu);font-weight:700;font-size:14px;cursor:pointer}.tsb.on{border-color:var(--a);color:var(--a);box-shadow:inset 0 0 0 1px var(--a)}
+
+html[data-theme=blue] body{color:#0f1b3d}
+html[data-theme=blue] html,html[data-theme=blue] body{background:var(--bg)}
+html[data-theme=blue] body::before{background:radial-gradient(70% 40% at 100% 0,rgba(18,160,110,.16),transparent 70%),linear-gradient(180deg,#f3f7ff,#eaf1fd)}
+html[data-theme=blue]{--a:#1a66e0;--bg:#eef4ff;--ln:#dbe4f3;--mu:#64748b;--rd:#e5484d;--gd:#b7791f;--card:#fff;--card2:#f4f7fd;--inp:#fff;--ok:#12805c}
+html[data-theme=blue] header{background:rgba(255,255,255,.94);border-bottom:1px solid #dbe4f3}
+html[data-theme=blue] nav{background:rgba(255,255,255,.95);border-top:1px solid #dbe4f3}
+html[data-theme=blue] .av{background:linear-gradient(135deg,#2b8ef0,#1558c0);color:#fff;border-color:#fff}
+html[data-theme=blue] .pill,html[data-theme=blue] .gr{background:#fff}
+html[data-theme=blue] .c:not(.mine),html[data-theme=blue] .stat3>div,html[data-theme=blue] .mkst>div,html[data-theme=blue] .fpr>div,html[data-theme=blue] .dc,html[data-theme=blue] .sg,html[data-theme=blue] .dbl,html[data-theme=blue] .dep,html[data-theme=blue] details.rl,html[data-theme=blue] details.fq,html[data-theme=blue] .disc{background:#fff;border:1px solid #dbe4f3;box-shadow:0 6px 20px rgba(26,102,224,.08);backdrop-filter:none;-webkit-backdrop-filter:none}
+html[data-theme=blue] .dbl{background:#fff8e6;border-color:#e8c46a}
+html[data-theme=blue] .mine{background:radial-gradient(90% 60% at 50% 0,rgba(18,128,92,.1),transparent 70%),#fff;border:1px solid #dbe4f3;box-shadow:0 6px 20px rgba(26,102,224,.08);backdrop-filter:none}
+html[data-theme=blue] .hero{background:linear-gradient(135deg,#0d3b82,#1a66e0);border:0;box-shadow:0 10px 28px rgba(26,102,224,.3);backdrop-filter:none}
+html[data-theme=blue] .hero .hb{color:#fff;text-shadow:none}
+html[data-theme=blue] .hero .m,html[data-theme=blue] .hero .hs{color:#cfe0ff}
+html[data-theme=blue] .big,html[data-theme=blue] .cert .big{text-shadow:none}
+html[data-theme=blue] .rb{stroke:#e3ebf8}
+html[data-theme=blue] .b{background:linear-gradient(135deg,#1a73e8,#1558c0);border-color:rgba(255,255,255,.35);box-shadow:0 6px 16px rgba(26,102,224,.3);text-shadow:none;color:#fff}
+html[data-theme=blue] .b.gd{background:linear-gradient(135deg,#f6dc8d,#c79a3b);color:#2a1d02;border-color:rgba(199,154,59,.6);box-shadow:0 4px 12px rgba(199,154,59,.25)}
+html[data-theme=blue] .b.x{background:linear-gradient(135deg,#ff5470,#d12c48);color:#fff;box-shadow:0 4px 12px rgba(229,72,77,.25)}
+html[data-theme=blue] .b:disabled{background:#e6edf9;color:#7b8aa8;border-color:#dbe4f3;box-shadow:none}
+html[data-theme=blue] .ab3 .b,html[data-theme=blue] .b.bk{background:#fff;color:var(--a);border-color:#cbd8ee;box-shadow:none}
+html[data-theme=blue] input,html[data-theme=blue] select,html[data-theme=blue] textarea{background:#fff;color:#0f1b3d;border-color:#cbd8ee}
+html[data-theme=blue] .sg a.on{background:linear-gradient(135deg,#1a73e8,#1558c0);color:#fff;box-shadow:none}
+html[data-theme=blue] .vcard,html[data-theme=blue] .fh{background:radial-gradient(120% 120% at 100% 0,#3b8bff 0,transparent 55%),linear-gradient(135deg,#0d3b82,#1a66e0);border-color:rgba(255,255,255,.35);box-shadow:0 12px 30px rgba(26,102,224,.3)}
+html[data-theme=blue] .vcard.v2{background:radial-gradient(120% 120% at 100% 0,#7ff0c4 0,transparent 55%),linear-gradient(135deg,#0d3b82,#12805c)}
+html[data-theme=blue] .tier.t1,html[data-theme=blue] .cert{background:linear-gradient(145deg,#fff7e0,#fff);border-color:#e0b84f;box-shadow:0 6px 20px rgba(199,154,59,.15)}
+html[data-theme=blue] .tier.t2{background:linear-gradient(145deg,#e6f7f0,#fff);border-color:#12805c;box-shadow:0 6px 20px rgba(18,128,92,.12)}
+html[data-theme=blue] .rules,html[data-theme=blue] .tier li,html[data-theme=blue] .dep code{color:#1b2a4a}
+html[data-theme=blue] .dep{border-color:#9db8e6}
+html[data-theme=blue] .lvc{background:#fff3d6}
+html[data-theme=blue] .lvbar{background:#e3ebf8}
+html[data-theme=blue] .pbox,html[data-theme=blue] #sh .sb{background:#fff;border-color:#e0b84f}
+html[data-theme=blue] #ts{background:#fff;color:#0f1b3d;box-shadow:0 8px 24px rgba(15,27,61,.18)}
+html[data-theme=blue] #snd{background:rgba(255,255,255,.9);color:#0f1b3d}
+html[data-theme=blue] .sk{background:linear-gradient(90deg,#e6edf9,#f4f7fd,#e6edf9);background-size:200% 100%}
 </style></head><body><div id="app"><div class="sk"></div><div class="sk"></div><div class="sk s2"></div></div><div id="ts" role="status" aria-live="polite"></div><div id="pp"></div><div id="sh"></div><nav id="nav"></nav><button id="snd" type="button" aria-label="Sound"></button>
 <script>
 const VER='{{VER}}',GEAR='<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',CLOSE='<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>';
@@ -1197,7 +1237,7 @@ function gi(e){const m={128375:'lg',9889:'m',9989:'tk',128101:'inv',10004:'vf',1
 function drow(k,t,sb,r,a,x){return '<div class="c dc"><div class="dr"'+(a?' '+a:'')+'>'+ic(k,44)+'<div class="tx"><b>'+t+'</b><span class="m">'+sb+'</span></div>'+r+'</div>'+(x||'')+'</div>'}
 function qt(a,k,t,sb){return '<div class="c qt" '+a+'>'+ic(k,48)+'<b>'+t+'</b><span class="m">'+sb+'</span></div>'}
 function mine(){const u=S.u,m=u.mst;
-return dblbar()+homebal(1)+'<div class="c mine"><span class="st'+(m?' on':'')+'">'+(m?'<i class="pl"></i>MINING LIVE':'● IDLE')+'</span>'+(S.lv?'<div class="m" style="margin-top:8px">'+bdg(S.lv)+' boost active</div>':'')+'<div class="ringw"><svg class="ring" viewBox="0 0 200 200"><defs><linearGradient id="gr" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2dffa0"/><stop offset="1" stop-color="#f0d27a"/></linearGradient></defs><circle class="rb" cx="100" cy="100" r="88"/><circle class="rf" id="rg" cx="100" cy="100" r="88"/></svg><div class="rin"><div class="dgw">'+dig(m)+'</div><div class="big" id="mn">0.000000</div><span class="m" id="pc">SPC mined</span></div></div><div class="stat3"><div><span>Per day</span><b>'+fmx(S.er)+'</b></div><div><span>Per hour</span><b>'+(S.er/24).toFixed(2)+'</b></div><div><span>Min claim</span><b>'+S.c.minc+'</b></div></div>'+(m?'<p class="m" style="margin:4px 0">Mining pauses after 24 hours, so claim before that.</p><p class="m" id="eta" style="margin:4px 0"></p><button class="b" id="cb" data-a="mc" disabled>Claim SPC</button>':'<button class="b" data-a="ms">▶ Start mining</button>')+'</div>'}
+return dblbar()+homebal(1)+themebar()+'<div class="c mine"><span class="st'+(m?' on':'')+'">'+(m?'<i class="pl"></i>MINING LIVE':'● IDLE')+'</span>'+(S.lv?'<div class="m" style="margin-top:8px">'+bdg(S.lv)+' boost active</div>':'')+'<div class="ringw"><svg class="ring" viewBox="0 0 200 200"><defs><linearGradient id="gr" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2dffa0"/><stop offset="1" stop-color="#f0d27a"/></linearGradient></defs><circle class="rb" cx="100" cy="100" r="88"/><circle class="rf" id="rg" cx="100" cy="100" r="88"/></svg><div class="rin"><div class="dgw">'+dig(m)+'</div><div class="big" id="mn">0.000000</div><span class="m" id="pc">SPC mined</span></div></div><div class="stat3"><div><span>Per day</span><b>'+fmx(S.er)+'</b></div><div><span>Per hour</span><b>'+(S.er/24).toFixed(2)+'</b></div><div><span>Min claim</span><b>'+S.c.minc+'</b></div></div>'+(m?'<p class="m" style="margin:4px 0">Mining pauses after 24 hours, so claim before that.</p><p class="m" id="eta" style="margin:4px 0"></p><button class="b" id="cb" data-a="mc" disabled>Claim SPC</button>':'<button class="b" data-a="ms">▶ Start mining</button>')+'</div>'}
 function home(){const nt=S.tk.length,td=S.tk.filter(function(x){return x.dc}).length,dl=chkc()+vidc()+wbcc();
 return (cmchk(),'')+dblbar()+(CM===false?joinnote():'')+homebal()+lvcard()+(dl?'<div class="sec">Daily</div>'+dl:'')+'<div class="sec">Explore</div><div class="qg">'+qt('data-a="tab" data-t="t"','tk','Tasks',nt?td+' of '+nt+' done':'None now')+qt('data-a="tab" data-t="b"','rk','Ranking','Top 100')+qt('data-a="po"','pr','Promote Spider','Create my poster')+qt('data-a="tab" data-t="pl"','pl','Promote a link','Get visits')+'</div>'+livec()+'<p class="m" style="text-align:center;margin-bottom:10px">Support @{{AU}}</p>'}
 function story(){if(!S.c.sm)return '';const u=S.u,n=Date.now()+off,wt=u.sl&&n-u.sl<6048e5,rem=u.ss?Math.ceil(S.c.secs-(n-u.ss)/1e3):0;
@@ -1550,7 +1590,7 @@ if(sn)unsnap(sn);const IC={f:'<path d="M12 21v-9M12 12c-4 0-6-2-6-6 4 0 6 2 6 6z
 const tb=[['h','Home'],['m','Mining'],['f','Farm'],['r','Refer'],['w','Wallet']];
 $('nav').innerHTML=tb.map(t=>'<a role="button" aria-label="'+t[1]+'" data-a="tab" data-t="'+t[0]+'" class="'+((tab==t[0]||(t[0]=='h'&&(tab=='t'||tab=='b'||tab=='pl'||tab=='ab'||tab=='hp'||tab=='lm')))?'on':'')+(dotf(t[0])?' dot':'')+'">'+ic(t[0],28)+'<span>'+t[1]+'</span></a>').join('');
 const bl=$('bal');if(bl){if(pb!==null&&pb!=u.b){const a0=+pb,t0=performance.now(),to=+u.b,st=t=>{const k=Math.min(1,(t-t0)/600);bl.textContent=f(a0+(to-a0)*k);if(k<1)requestAnimationFrame(st)};requestAnimationFrame(st)}pb=u.b}ld();popup();shsync();tkmount();window.scrollTo(0,sm?sy:0);if(tab=='lm'&&!sm){const ce=$('lvcur');if(ce&&ce.getBoundingClientRect)window.scrollTo(0,Math.max(0,ce.getBoundingClientRect().top+window.scrollY-window.innerHeight/2))}bbsync()}
-document.onclick=e=>{if(e.target&&e.target.closest&&e.target.closest('#snd')){SND=SND?0:1;try{localStorage.setItem('snd',SND?'1':'0')}catch(x){}sndui();if(SND)snd('zap');return}if(e.target&&e.target.id=='pp'){closepop();return}const b=e.target.closest('[data-a]');if(!b)return;const a0=b.dataset.a,F0=b.closest('[data-f]');
+document.onclick=e=>{const tb=e.target&&e.target.closest&&e.target.closest('[data-a="thm"]');if(tb){setTheme(tb.dataset.k);snd('zap');spark(e);return}if(e.target&&e.target.closest&&e.target.closest('#snd')){SND=SND?0:1;try{localStorage.setItem('snd',SND?'1':'0')}catch(x){}sndui();if(SND)snd('zap');return}if(e.target&&e.target.id=='pp'){closepop();return}const b=e.target.closest('[data-a]');if(!b)return;const a0=b.dataset.a,F0=b.closest('[data-f]');
 const cq=CFB?'':CFQ(a0,b);if(cq&&T.showConfirm){T.showConfirm(cq,function(ok){if(ok){CFB=1;try{b.click()}finally{CFB=0}}});return}
 if(a0=='as'&&F0){const bad=[].filter.call(F0.querySelectorAll('input'),function(i){return NUMK.indexOf(i.name)>-1&&(String(i.value).trim()===''||isNaN(+i.value))})[0];if(bad){toast('Check: '+(L[bad.name]||bad.name));return}}
 if(S&&S.c&&(a0=='vo'||a0=='fu'||a0=='pr')){const pe=F0&&F0.querySelector('[name=pay]');if(!S.c.dep&&(a0!='pr'||(pe&&pe.value=='u'))){toast('USDT payments are not open yet. Please try again later.');return}}
@@ -1590,6 +1630,11 @@ function spark(e){try{const x=e.clientX||LC.x,y=e.clientY||LC.y;LC={x:x,y:y};el(
 function burst(n){try{for(let i=0;i<n;i++){const a=Math.random()*Math.PI*2,d=50+Math.random()*90;el('zc',LC.x,LC.y,{'--x':Math.cos(a)*d+'px','--y':(Math.sin(a)*d-70)+'px'},1000)}}catch(x){}}
 function celeb(){LC={x:innerWidth/2,y:innerHeight*.4};burst(30);el('zg',0,0,{},1450)}
 function cup(a,b){try{const e=document.querySelector('.hb');if(!e||!(b>a))return;const t0=performance.now();(function st(t){const p=Math.min(1,(t-t0)/800),k=1-Math.pow(1-p,3);e.textContent=fm(a+(b-a)*k);if(p<1)requestAnimationFrame(st)})(t0)}catch(x){}}
+let TH='d';try{TH=localStorage.getItem('th')=='b'?'b':'d'}catch(e){}
+function applyTheme(){if(TH=='b')document.documentElement.setAttribute('data-theme','blue');else document.documentElement.removeAttribute('data-theme');try{T.setHeaderColor(TH=='b'?'#ffffff':'#030a06');T.setBackgroundColor(TH=='b'?'#eef4ff':'#030a06')}catch(e){}}
+function setTheme(k){TH=k=='b'?'b':'d';try{localStorage.setItem('th',TH)}catch(e){}applyTheme();if(S)render()}
+function themebar(){return '<div class="tsw" role="group" aria-label="Theme"><button type="button" class="tsb'+(TH=='d'?' on':'')+'" data-a="thm" data-k="d" aria-pressed="'+(TH=='d')+'">\u{1F319} Dark</button><button type="button" class="tsb'+(TH=='b'?' on':'')+'" data-a="thm" data-k="b" aria-pressed="'+(TH=='b')+'">\u{2600}\u{FE0F} Blue</button></div>'}
+applyTheme();
 sndui();
 setInterval(function(){if(!S)return;const a=document.querySelector('nav a[data-t="m"]');if(a)a.classList.toggle('dot',dotf('m'))},3000);
 setInterval(()=>{const m=$('mn');if(m&&S&&!document.hidden){const u=S.u,v=u.mst?Math.min(Date.now()+off-u.mst,864e5)*S.er/864e5:0;m.textContent=v.toFixed(6);const b=$('cb');if(b)b.disabled=v<+S.c.minc;const p=Math.min(1,v/+S.c.minc),g=$('rg');if(g)g.style.strokeDashoffset=553*(1-p);const pc=$('pc');if(pc)pc.textContent=u.mst?Math.floor(p*100)+'% to claim':'SPC mined';const et=$('eta');if(et)et.textContent=v>=+S.c.minc?'Ready to claim':(+S.er>0?'Ready to claim in '+hms((+S.c.minc-v)/+S.er*864e5):'')}},250);
